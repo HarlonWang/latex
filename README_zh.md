@@ -230,6 +230,11 @@ fun MyScreen() {
 
 ### 数学字体
 
+> [!WARNING]
+> **强烈建议添加并启用配套的 `latex-fonts-katex` 字体库。**
+> 布局引擎使用 KaTeX 专用数学度量。使用其他字体可能出现缺字、符号或重音错位、
+> 上下标间距异常及括号缩放失真，**不使用配套字体时无法保证渲染正确性。**
+
 `latex-renderer` 默认使用系统字体，不携带字体文件。需要 KaTeX 字体时，
 添加可选的 `latex-fonts-katex` 依赖（见[安装](#-安装)），在 Composable 中配置：
 
@@ -253,8 +258,6 @@ fun Formula() {
 `com.hrm.latex.fonts.KatexFonts.install()`。显式配置的 `fontFamilies` 优先；
 通过 `com.hrm.latex.renderer.model` 中的 `systemLatexFontFamilies()` 可指定系统字体。
 仅添加依赖不会自动启用 KaTeX。
-
-系统字体随平台变化，可能缺少部分数学字形；当前布局引擎仍使用基于 KaTeX 的数学度量。
 
 ### 主题配置
 
@@ -479,12 +482,12 @@ latex-fonts-katex = { module = "io.github.huarangmeng:latex-fonts-katex", versio
 ```kotlin
 commonMain.dependencies {
     implementation(libs.latex.renderer) // 已包含 parser 和 base
-    implementation(libs.latex.fonts.katex) // 可选：KaTeX 字体资源
+    implementation(libs.latex.fonts.katex) // 强烈推荐：配套 KaTeX 字体
 }
 ```
 
 Android/JVM 单平台模块将依赖放在 `dependencies` 中。
-使用系统字体时省略字体依赖；启用 KaTeX 的方式见[数学字体](#数学字体)。
+字体依赖虽然可选，但省略后可能导致渲染异常；启用方式见[数学字体](#数学字体)。
 只需要解析时，仅依赖 `libs.latex.parser`。
 
 ## 🏗️ 项目结构

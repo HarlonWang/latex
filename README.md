@@ -230,6 +230,12 @@ fun MyScreen() {
 
 ### Math Fonts
 
+> [!WARNING]
+> **We strongly recommend adding and enabling the bundled `latex-fonts-katex` fonts.**
+> The layout engine uses KaTeX-specific math metrics. Other fonts may cause missing
+> glyphs, misaligned symbols or accents, incorrect script spacing, and distorted
+> delimiter sizing. **Correct rendering is not guaranteed without the matching fonts.**
+
 `latex-renderer` uses system fonts by default and bundles no font files.
 For KaTeX fonts, add the optional `latex-fonts-katex` dependency (see
 [Installation](#-installation)) and configure them in a Composable:
@@ -254,9 +260,6 @@ To make KaTeX the global default, call `com.hrm.latex.fonts.KatexFonts.install()
 once during app initialization instead. Explicit `fontFamilies` takes priority;
 use `systemLatexFontFamilies()` from `com.hrm.latex.renderer.model` to select
 system fonts even after registration. Adding the dependency alone does not enable KaTeX.
-
-System fonts vary by platform and may lack some math glyphs; the layout engine
-still uses KaTeX-based math metrics.
 
 ### Theme Configuration
 
@@ -482,13 +485,14 @@ In your module's `build.gradle.kts`, add to `kotlin.sourceSets`:
 ```kotlin
 commonMain.dependencies {
     implementation(libs.latex.renderer) // Includes parser and base
-    implementation(libs.latex.fonts.katex) // Optional: KaTeX font resources
+    implementation(libs.latex.fonts.katex) // Strongly recommended: matching KaTeX fonts
 }
 ```
 
 For Android/JVM-only modules, put these dependencies in `dependencies`.
-To use system fonts, omit the optional font dependency. To enable KaTeX, follow
-[Math Fonts](#math-fonts). For parsing only, depend on `libs.latex.parser`.
+The font dependency is optional, but omitting it may cause rendering issues.
+To enable KaTeX, follow [Math Fonts](#math-fonts). For parsing only, depend on
+`libs.latex.parser`.
 
 ## 🏗️ Project Structure
 
