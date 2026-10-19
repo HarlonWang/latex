@@ -13,7 +13,7 @@
 
 # latex-renderer 不直接使用反射 / JNI / ServiceLoader，
 # Measurer 注册表通过 KClass 作为 Map 键，在 R8 优化下行为正确（不依赖类名）。
-# Compose Resources（KaTeX 字体）通过生成的 Res.font.* 静态调用访问，
+# Compose Resources（KaTeX 字体）通过固定资源路径读取，不反射可选模块的类，
 # Compose Multiplatform 自带 consumer-rules 已覆盖资源加载链路。
 
 # 公共 API 注解（@OptIn / @Stable / @Immutable 等运行时注解）

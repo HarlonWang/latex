@@ -11,7 +11,6 @@ import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import com.hrm.latex.base.log.HLog
 import java.io.File
-import java.nio.ByteBuffer
 
 internal actual fun fontFromBytes(
     identity: String,
@@ -31,31 +30,30 @@ private class MemoryFont(
 
     // Compose 可能从多个解析器请求同一字体，平台字体对象也只创建一次。
     @Synchronized
-    fun load(context: Context): Typeface? {
+    fun load(context: Context): Typeface {
         if (!attempted) {
             attempted = true
             typeface = try {
-                if (Build.VERSION.SDK_INT >= 26) {
-                    val buffer = ByteBuffer.allocateDirect(bytes.size).apply { put(bytes); flip() }
-                    Typeface.Builder(buffer)
-                        .setWeight(weight.weight)
-                        .setItalic(style == FontStyle.Italic)
-                        .build()
-                } else {
-                    val file = File.createTempFile("latex-font-", ".ttf", context.cacheDir)
-                    try {
-                        file.writeBytes(bytes)
+                val file = File.createTempFile("latex-font-", ".ttf", context.cacheDir)
+                try {
+                    file.writeBytes(bytes)
+                    if (Build.VERSION.SDK_INT >= 26) {
+                        Typeface.Builder(file)
+                            .setWeight(weight.weight)
+                            .setItalic(style == FontStyle.Italic)
+                            .build()
+                    } else {
                         Typeface.createFromFile(file)
-                    } finally {
-                        file.delete()
                     }
+                } finally {
+                    file.delete()
                 }
             } catch (failure: Exception) {
                 HLog.e("LatexFonts", "无法创建字体 $identity", failure)
                 null
             }
         }
-        return typeface
+        return typeface ?: Typeface.DEFAULT
     }
 }
 
