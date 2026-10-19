@@ -1,3 +1,5 @@
+@file:OptIn(org.jetbrains.compose.resources.InternalResourceApi::class)
+
 package com.hrm.latex.renderer.font
 
 import androidx.compose.ui.text.TextMeasurer
@@ -12,6 +14,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.compose.resources.MissingResourceException
+import org.jetbrains.compose.resources.readResourceBytes
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -27,8 +30,7 @@ class KatexFontResourcesTest {
             val loader = DefaultFontLoader(scope, load = {
                 loadKatexFonts { path ->
                     reads += path
-                    javaClass.classLoader.getResourceAsStream(path)?.use { it.readBytes() }
-                        ?: throw MissingResourceException(path)
+                    readResourceBytes(path)
                 }
             })
             val fonts = loader.await()
@@ -61,6 +63,37 @@ class KatexFontResourcesTest {
             })
             repeat(10) { assertEquals(systemLatexFontFamilies(), loader.await()) }
             assertEquals(1, reads)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    /** 同一测试可在含字体及移除字体 JAR 的运行环境执行，覆盖真实平台资源读取与排版。 */
+    @Test
+    fun should_render_with_available_default_fonts() = runBlocking<Unit> {
+        val hasResources = javaClass.classLoader.getResource("${KATEX_RESOURCE_ROOT}katex_main_regular.ttf") != null
+        var failures = 0
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            val loader = DefaultFontLoader(scope, load = { loadKatexFonts() }, onFailure = { failures++ })
+            val fonts = loader.await()
+            repeat(10) { assertSame(fonts, loader.await()) }
+            if (hasResources) {
+                assertTrue(assertNotNull(fonts.mainBytes).isNotEmpty())
+                assertEquals(0, failures)
+            } else {
+                assertEquals(systemLatexFontFamilies(), fonts)
+                assertEquals(1, failures)
+            }
+            val density = Density(1f)
+            val measurer = LatexMeasurerState(
+                density,
+                TextMeasurer(createFontFamilyResolver(), density, LayoutDirection.Ltr),
+                fonts,
+            )
+            for (formula in listOf("x^2 + y^2 = z^2", "\\frac{a}{b} + \\sqrt{x}", "\\mathbb{R} + \\mathcal{F}")) {
+                assertNotNull(measurer.measure(formula))
+            }
         } finally {
             scope.cancel()
         }
