@@ -23,8 +23,8 @@
 - 此模块仅用于开发测试，不会被包含在 `latex-sdk` 的发布版本中
 - 只支持 JVM/Desktop 平台
 - 可以在这里测试各种 LaTeX 表达式的渲染效果
-- `composeApp` 已依赖可选的 `latex-fonts-katex` 并在 `App()` 中调用 `KatexFonts.install()`；其他预览宿主需要自行添加依赖并在首次渲染前注册，否则使用系统字体
-- `BasicLatexPreview` 中包含独立的主题示例分组，可直接验证 `LatexTheme` 新 API 的表现
+- `composeApp` 已注册 KaTeX 默认字体；其他宿主可按[数学字体](../README_zh.md#数学字体)选择系统字体或 KaTeX
+- `BasicLatexPreview` 的 `24. 主题模式` 分组覆盖主题配置，以及通过 `LatexConfig.fontFamilies` 显式选择系统字体和等宽字体的示例
 - `数学模式切换` 分组包含 KaTeX 字体路由、Rule 15/18、积分上下限、重音符号和定界符数学轴回归样例
 - `基础 LaTeX → 18. 数学模式切换` 的 23–28 号样例对照普通与 cramped 上标、分母、根式、重音、上下限和手动命令
 - `physics / siunitx 常用子集` 分组覆盖导数、狄拉克符号、对易子、向量和现代 SI 单位排版

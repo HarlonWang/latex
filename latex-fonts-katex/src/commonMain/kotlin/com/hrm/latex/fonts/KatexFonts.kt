@@ -11,7 +11,6 @@ import androidx.compose.ui.text.font.FontWeight
 import com.hrm.latex.base.log.HLog
 import com.hrm.latex.renderer.model.LatexFontFamilies
 import com.hrm.latex.renderer.model.LatexFontRegistry
-import kotlin.concurrent.Volatile
 import latex.latex_fonts_katex.generated.resources.Res
 import latex.latex_fonts_katex.generated.resources.katex_ams_regular
 import latex.latex_fonts_katex.generated.resources.katex_caligraphic_bold
@@ -36,16 +35,18 @@ import latex.latex_fonts_katex.generated.resources.katex_typewriter_regular
 import org.jetbrains.compose.resources.Font
 import org.jetbrains.compose.resources.getFontResourceBytes
 import org.jetbrains.compose.resources.getSystemResourceEnvironment
+import kotlin.concurrent.Volatile
 
 private const val TAG = "KatexFonts"
 
 /**
  * 内置 KaTeX 字体模块：字体资源不再随 latex-renderer 发布，需要完整 KaTeX 字形的宿主
- * 依赖本模块并调用 [KatexFonts.install] 注册；不依赖本模块时渲染器退回系统字体。
+ * 依赖本模块后，可调用 [KatexFonts.install] 注册默认字体，或通过
+ * `LatexConfig(fontFamilies = katexFontFamilies())` 显式配置；不依赖本模块时使用系统字体。
  */
-public object KatexFonts {
+object KatexFonts {
     /** 把内置 KaTeX 字体注册为渲染器默认字体。只需调用一次，建议放在 Application 初始化处。 */
-    public fun install() {
+    fun install() {
         LatexFontRegistry.provider = { katexFontFamilies() }
     }
 }
@@ -64,7 +65,7 @@ private var fontBytesLoaded = false
  * bytes 加载完成后更新全局状态，所有 Composable 自动重组获得完整数据。
  */
 @Composable
-public fun katexFontFamilies(): LatexFontFamilies {
+fun katexFontFamilies(): LatexFontFamilies {
     val cached = defaultFontFamiliesState
     if (cached != null) {
         if (!fontBytesLoaded) {
@@ -75,21 +76,37 @@ public fun katexFontFamilies(): LatexFontFamilies {
         return cached
     }
 
-    val mainRegular = Font(Res.font.katex_main_regular, weight = FontWeight.Normal, style = FontStyle.Normal)
-    val mainBold = Font(Res.font.katex_main_bold, weight = FontWeight.Bold, style = FontStyle.Normal)
-    val mainItalic = Font(Res.font.katex_main_italic, weight = FontWeight.Normal, style = FontStyle.Italic)
-    val mainBoldItalic = Font(Res.font.katex_main_bolditalic, weight = FontWeight.Bold, style = FontStyle.Italic)
-    val mathItalic = Font(Res.font.katex_math_italic, weight = FontWeight.Normal, style = FontStyle.Italic)
-    val mathBoldItalic = Font(Res.font.katex_math_bolditalic, weight = FontWeight.Bold, style = FontStyle.Italic)
+    val mainRegular =
+        Font(Res.font.katex_main_regular, weight = FontWeight.Normal, style = FontStyle.Normal)
+    val mainBold =
+        Font(Res.font.katex_main_bold, weight = FontWeight.Bold, style = FontStyle.Normal)
+    val mainItalic =
+        Font(Res.font.katex_main_italic, weight = FontWeight.Normal, style = FontStyle.Italic)
+    val mainBoldItalic =
+        Font(Res.font.katex_main_bolditalic, weight = FontWeight.Bold, style = FontStyle.Italic)
+    val mathItalic =
+        Font(Res.font.katex_math_italic, weight = FontWeight.Normal, style = FontStyle.Italic)
+    val mathBoldItalic =
+        Font(Res.font.katex_math_bolditalic, weight = FontWeight.Bold, style = FontStyle.Italic)
     val amsRegular = Font(Res.font.katex_ams_regular)
-    val sansSerifRegular = Font(Res.font.katex_sansserif_regular, weight = FontWeight.Normal, style = FontStyle.Normal)
-    val sansSerifBold = Font(Res.font.katex_sansserif_bold, weight = FontWeight.Bold, style = FontStyle.Normal)
-    val sansSerifItalic = Font(Res.font.katex_sansserif_italic, weight = FontWeight.Normal, style = FontStyle.Italic)
+    val sansSerifRegular =
+        Font(Res.font.katex_sansserif_regular, weight = FontWeight.Normal, style = FontStyle.Normal)
+    val sansSerifBold =
+        Font(Res.font.katex_sansserif_bold, weight = FontWeight.Bold, style = FontStyle.Normal)
+    val sansSerifItalic =
+        Font(Res.font.katex_sansserif_italic, weight = FontWeight.Normal, style = FontStyle.Italic)
     val typewriterRegular = Font(Res.font.katex_typewriter_regular)
-    val caligraphicRegular = Font(Res.font.katex_caligraphic_regular, weight = FontWeight.Normal, style = FontStyle.Normal)
-    val caligraphicBold = Font(Res.font.katex_caligraphic_bold, weight = FontWeight.Bold, style = FontStyle.Normal)
-    val frakturRegular = Font(Res.font.katex_fraktur_regular, weight = FontWeight.Normal, style = FontStyle.Normal)
-    val frakturBold = Font(Res.font.katex_fraktur_bold, weight = FontWeight.Bold, style = FontStyle.Normal)
+    val caligraphicRegular = Font(
+        Res.font.katex_caligraphic_regular,
+        weight = FontWeight.Normal,
+        style = FontStyle.Normal
+    )
+    val caligraphicBold =
+        Font(Res.font.katex_caligraphic_bold, weight = FontWeight.Bold, style = FontStyle.Normal)
+    val frakturRegular =
+        Font(Res.font.katex_fraktur_regular, weight = FontWeight.Normal, style = FontStyle.Normal)
+    val frakturBold =
+        Font(Res.font.katex_fraktur_bold, weight = FontWeight.Bold, style = FontStyle.Normal)
     val scriptRegular = Font(Res.font.katex_script_regular)
     val size1Regular = Font(Res.font.katex_size1_regular)
     val size2Regular = Font(Res.font.katex_size2_regular)

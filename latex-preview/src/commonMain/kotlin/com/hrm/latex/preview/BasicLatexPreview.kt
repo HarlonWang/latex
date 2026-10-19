@@ -34,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.hrm.latex.renderer.AnimatedLatex
@@ -44,6 +45,7 @@ import com.hrm.latex.renderer.model.HighlightConfig
 import com.hrm.latex.renderer.model.HighlightRange
 import com.hrm.latex.renderer.model.LatexConfig
 import com.hrm.latex.renderer.model.LatexTheme
+import com.hrm.latex.renderer.model.systemLatexFontFamilies
 import kotlinx.coroutines.delay
 
 /**
@@ -1275,7 +1277,7 @@ val basicLatexPreviewGroups = listOf(
     PreviewGroup(
         id = "themes",
         title = "24. 主题模式",
-        description = "Auto、Light、Dark 与 Material3 主题适配",
+        description = "Auto、Light、Dark、Material3 主题及 LatexConfig 字体配置",
         items = listOf(
             PreviewItem(
                 "1", "Auto 跟随系统", "E = mc^2",
@@ -1310,6 +1312,28 @@ val basicLatexPreviewGroups = listOf(
                     Latex(
                         latex = "\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}",
                         config = LatexConfig(theme = LatexTheme.material3())
+                    )
+                }
+            ),
+            PreviewItem(
+                "5", "显式使用系统字体", "E = mc^2",
+                content = {
+                    Latex(
+                        latex = "E = mc^2",
+                        config = LatexConfig(fontFamilies = systemLatexFontFamilies())
+                    )
+                }
+            ),
+            PreviewItem(
+                "6", "配置等宽字体", "\\text{WWWWiiii} + x^2",
+                content = {
+                    val fonts = systemLatexFontFamilies().copy(
+                        main = FontFamily.Monospace,
+                        math = FontFamily.Monospace
+                    )
+                    Latex(
+                        latex = "\\text{WWWWiiii} + x^2",
+                        config = LatexConfig(fontFamilies = fonts)
                     )
                 }
             ),

@@ -220,6 +220,13 @@ data class LatexConfig(
      * ```
      */
     val enableLayoutCache: Boolean = false,
+    /**
+     * 公式字体集，同时用于渲染、测量、编辑器和导出。
+     *
+     * null 表示在 Compose 入口解析默认字体：注册了可选 KaTeX 模块时使用 KaTeX，
+     * 否则使用系统字体。显式传入时不会加载默认字体资源。
+     */
+    val fontFamilies: LatexFontFamilies? = null,
 )
 
 /**
@@ -367,7 +374,7 @@ internal data class RenderContext(
  * 从外部配置创建初始上下文
  *
  * @param isDark 当前环境是否为深色模式，仅在 `LatexTheme.auto(...)` 时参与主题解析
- * @param fontFamilies 内置 KaTeX TTF 字体家族
+ * @param fontFamilies 已在 Compose 入口解析的默认字体家族；配置中的显式字体优先
  * @param provider 预创建的 MathFontProvider（由调用方缓存，避免每次重组创建新实例）
  */
 internal fun LatexConfig.toContext(
@@ -384,16 +391,18 @@ internal fun LatexConfig.toContext(
 
     val resolvedErrorColor = if (isDark) Color(0xFFFF6666) else Color(0xFFCC0000)
 
-    // 使用调用方传入的 provider（已缓存），或按需创建（兼容旧调用路径）
-    val resolvedProvider = provider ?: MathFontProviderFactory.create(fontFamilies)
+    val resolvedFontFamilies = this.fontFamilies ?: fontFamilies
+    // 仅复用与最终字体集一致的 provider，避免同步测量/导出覆盖字体时混用度量。
+    val resolvedProvider = provider?.takeIf { resolvedFontFamilies == fontFamilies }
+        ?: MathFontProviderFactory.create(resolvedFontFamilies)
 
     return RenderContext(
         fontSize = fontSize,
         baseFontSize = fontSize,
         color = resolvedColor,
         errorColor = resolvedErrorColor,
-        fontFamily = fontFamilies.main,
-        fontFamilies = fontFamilies,
+        fontFamily = resolvedFontFamilies.main,
+        fontFamilies = resolvedFontFamilies,
         isVariantFontFamily = false,
         layoutHints = LayoutHints(
             maxLineWidth = if (lineBreaking.enabled) lineBreaking.maxWidth else null,

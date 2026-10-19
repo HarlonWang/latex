@@ -37,7 +37,7 @@ import com.hrm.latex.parser.model.LatexNode
 import com.hrm.latex.renderer.layout.LatexRenderer
 import com.hrm.latex.renderer.model.LatexConfig
 import com.hrm.latex.renderer.model.LatexFontFamilies
-import com.hrm.latex.renderer.model.defaultLatexFontFamilies
+import com.hrm.latex.renderer.model.resolveFontFamilies
 import com.hrm.latex.renderer.model.toContext
 
 private const val TAG = "LatexMeasurer"
@@ -96,7 +96,8 @@ data class LatexDimensions(
 class LatexMeasurerState internal constructor(
     private val density: Density,
     private val textMeasurer: TextMeasurer,
-    private val fontFamilies: LatexFontFamilies
+    private val fontFamilies: LatexFontFamilies,
+    private val defaultConfig: LatexConfig = LatexConfig()
 ) {
     private val parser = IncrementalLatexParser()
     private val dimensionsCache = linkedMapOf<MeasureCacheKey, LatexDimensions?>()
@@ -117,7 +118,7 @@ class LatexMeasurerState internal constructor(
      */
     fun measure(
         latex: String,
-        config: LatexConfig = LatexConfig(),
+        config: LatexConfig = defaultConfig,
         isDarkTheme: Boolean = false
     ): LatexDimensions? {
         if (latex.isBlank()) return null
@@ -173,7 +174,7 @@ class LatexMeasurerState internal constructor(
      */
     fun inlineContent(
         latex: String,
-        config: LatexConfig = LatexConfig()
+        config: LatexConfig = defaultConfig
     ): InlineTextContent? {
         if (latex.isBlank()) return null
 
@@ -186,7 +187,7 @@ class LatexMeasurerState internal constructor(
         val inlineContent = dimensions?.toInlineTextContent(
             density = density,
             latex = latex,
-            config = config
+            config = config.copy(fontFamilies = config.fontFamilies ?: fontFamilies)
         )
         inlineContentCache.putBounded(cacheKey, inlineContent)
         return inlineContent
@@ -205,7 +206,7 @@ class LatexMeasurerState internal constructor(
      */
     fun measureBatch(
         formulas: List<String>,
-        config: LatexConfig = LatexConfig(),
+        config: LatexConfig = defaultConfig,
         isDarkTheme: Boolean = false
     ): List<LatexDimensions?> {
         return formulas.map { measure(it, config, isDarkTheme) }
@@ -262,23 +263,23 @@ private fun <K, V> MutableMap<K, V>.putBounded(key: K, value: V) {
  * 创建并记住 [LatexMeasurerState] 实例。
  *
  * 必须在 Composable 作用域中调用，以获取 [TextMeasurer] 和 [Density]。
- * @param config 可选的渲染配置（用于提前加载字体）
- * @param fontFamilies 公式字体集。默认使用内置 KaTeX 字体；传入自定义字体集即可不加载内置字体资源。
+ * @param config 默认渲染配置，后续测量/导出调用可显式覆盖；字体也从此配置加载
  * @return [LatexMeasurerState] 实例
  */
 @Composable
 fun rememberLatexMeasurer(
-    config: LatexConfig = LatexConfig(),
-    fontFamilies: LatexFontFamilies = defaultLatexFontFamilies()
+    config: LatexConfig = LatexConfig()
 ): LatexMeasurerState {
+    val fontFamilies = config.resolveFontFamilies()
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
 
-    return remember(density, textMeasurer, fontFamilies) {
+    return remember(density, textMeasurer, fontFamilies, config) {
         LatexMeasurerState(
             density = density,
             textMeasurer = textMeasurer,
-            fontFamilies = fontFamilies
+            fontFamilies = fontFamilies,
+            defaultConfig = config
         )
     }
 }

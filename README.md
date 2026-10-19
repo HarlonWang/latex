@@ -199,7 +199,7 @@ TeX extensions include scoped groups (`{...}`, `\begingroup/\endgroup`, `\bgroup
 
 ## 📸 Rendering Preview
 
-The project includes a Demo App (`composeApp`/`androidApp`) showcasing various complex LaTeX scenarios. The preview dataset also contains a dedicated `Enclose / menclose` group covering circles, boxes, combined borders, strike-throughs, and color/background attributes:
+The project includes a Demo App (`composeApp`/`androidapp`) showcasing various complex LaTeX scenarios. The preview dataset also contains a dedicated `Enclose / menclose` group covering circles, boxes, combined borders, strike-throughs, and color/background attributes:
 
 | Basic Math | Chemical Formulas | Incremental Parsing |
 | :---: | :---: | :---: |
@@ -230,31 +230,33 @@ fun MyScreen() {
 
 ### Math Fonts
 
-`latex-renderer` contains no bundled font files and uses system fonts by default.
-To use the KaTeX TTF set, add the optional `latex-fonts-katex` dependency (see
-[Installation](#-installation)) and register it once during application initialization,
-before creating any formula UI, measurer, or exporter:
+`latex-renderer` uses system fonts by default and bundles no font files.
+For KaTeX fonts, add the optional `latex-fonts-katex` dependency (see
+[Installation](#-installation)) and configure them in a Composable:
 
 ```kotlin
-import com.hrm.latex.fonts.KatexFonts
+import androidx.compose.runtime.Composable
+import com.hrm.latex.fonts.katexFontFamilies
+import com.hrm.latex.renderer.Latex
+import com.hrm.latex.renderer.model.LatexConfig
 
-fun initializeLatexFonts() {
-    KatexFonts.install()
+@Composable
+fun Formula() {
+    val config = LatexConfig(fontFamilies = katexFontFamilies())
+    Latex(latex = "E = mc^2", config = config)
 }
 ```
 
-Call `initializeLatexFonts()` from your application's startup code. Registration
-applies globally to rendering, measurement, the editor, and export. Adding the
-dependency alone does not enable KaTeX fonts.
+Reuse this config with `LatexAutoWrap`, `LatexEditor`, `rememberLatexMeasurer`,
+and `rememberLatexExporter` for consistent fonts.
 
-To keep using system fonts and omit the font resources from your app, depend only
-on `latex-renderer` and skip registration. System glyph coverage and font metrics
-vary by platform; this fallback does not guarantee the same mathematical
-typography as KaTeX. The layout engine still uses KaTeX-based math metrics.
+To make KaTeX the global default, call `com.hrm.latex.fonts.KatexFonts.install()`
+once during app initialization instead. Explicit `fontFamilies` takes priority;
+use `systemLatexFontFamilies()` from `com.hrm.latex.renderer.model` to select
+system fonts even after registration. Adding the dependency alone does not enable KaTeX.
 
-**Migration:** fonts that were previously bundled with `latex-renderer` now require
-both the optional dependency and `KatexFonts.install()` to preserve the previous
-KaTeX appearance. `LatexConfig()` alone no longer enables the bundled fonts.
+System fonts vary by platform and may lack some math glyphs; the layout engine
+still uses KaTeX-based math metrics.
 
 ### Theme Configuration
 
@@ -452,68 +454,41 @@ fun MyEditor() {
 
 ## 📦 Installation
 
-### Version Compatibility
-
-This library publishes two variants for each release to support different Kotlin/Compose versions:
+Choose the variant matching your Kotlin version:
 
 | Variant | Kotlin | Compose Multiplatform | Artifact Version |
 |---------|--------|-----------------------|------------------|
-| **Standard** | 2.3.10 | 1.10.3 | `<version>` |
-| **Kotlin 2.1.0** | 2.1.0 | 1.9.3 | `<version>-kt2.1.0` |
+| Standard | 2.3.10 | 1.10.3 | `<version>` |
+| Kotlin 2.1.0 | 2.1.0 | 1.9.3 | `<version>-kt2.1.0` |
 
-> Choose the variant that matches your project's Kotlin version. If your project uses **Kotlin 2.1.0**, use the `-kt2.1.0` suffixed version.
+Replace `<version>` with a published release and use the same version for all
+LaTeX modules. KaTeX fonts require a release containing `latex-fonts-katex`.
 
-Replace `<version>` below with a published release. `latex-fonts-katex` is available
-starting with the first release containing the font-module split; earlier releases
-such as `1.5.0` do not contain this artifact. Use the same version and variant for
-all LaTeX modules you declare.
-
-### Standard Version (Kotlin 2.3.10)
-
-Add dependencies in `gradle/libs.versions.toml`:
+Add to `gradle/libs.versions.toml`:
 
 ```toml
 [versions]
-latex = "<version>"
+latex = "<version>" # Use "<version>-kt2.1.0" for Kotlin 2.1.0
 
 [libraries]
 latex-base = { module = "io.github.huarangmeng:latex-base", version.ref = "latex" }
 latex-parser = { module = "io.github.huarangmeng:latex-parser", version.ref = "latex" }
 latex-renderer = { module = "io.github.huarangmeng:latex-renderer", version.ref = "latex" }
-# Optional: bundled KaTeX fonts
 latex-fonts-katex = { module = "io.github.huarangmeng:latex-fonts-katex", version.ref = "latex" }
 ```
 
-### Kotlin 2.1.0 Compatible Version
-
-If your project uses Kotlin 2.1.0, use the `-kt2.1.0` suffixed artifacts:
-
-```toml
-[versions]
-latex = "<version>-kt2.1.0"
-
-[libraries]
-latex-base = { module = "io.github.huarangmeng:latex-base", version.ref = "latex" }
-latex-parser = { module = "io.github.huarangmeng:latex-parser", version.ref = "latex" }
-latex-renderer = { module = "io.github.huarangmeng:latex-renderer", version.ref = "latex" }
-# Optional: bundled KaTeX fonts, using the same compatible variant
-latex-fonts-katex = { module = "io.github.huarangmeng:latex-fonts-katex", version.ref = "latex" }
-```
-
-### Add to Your Module
-
-For Compose rendering, add the following to `commonMain.dependencies` in a KMP
-module (or `dependencies` in an Android/JVM module):
+In your module's `build.gradle.kts`, add to `kotlin.sourceSets`:
 
 ```kotlin
-implementation(libs.latex.renderer) // System fonts; transitively includes parser and base
-// Optional: omit this line to ship without the KaTeX font resources
-implementation(libs.latex.fonts.katex)
+commonMain.dependencies {
+    implementation(libs.latex.renderer) // Includes parser and base
+    implementation(libs.latex.fonts.katex) // Optional: KaTeX font resources
+}
 ```
 
-When including the optional fonts, also call `KatexFonts.install()` as shown in
-[Math Fonts](#math-fonts). For parsing without Compose rendering, depend only on
-`libs.latex.parser`.
+For Android/JVM-only modules, put these dependencies in `dependencies`.
+To use system fonts, omit the optional font dependency. To enable KaTeX, follow
+[Math Fonts](#math-fonts). For parsing only, depend on `libs.latex.parser`.
 
 ## 🏗️ Project Structure
 
@@ -523,13 +498,13 @@ When including the optional fonts, also call `KatexFonts.install()` as shown in
 - `:latex-fonts-katex`: Optional KaTeX TTF resources and registration API; depends on `latex-renderer`.
 - `:latex-preview`: Preview components and sample datasets.
 - `:composeApp`: Cross-platform Demo application.
-- `:androidApp`: Android Demo application.
+- `:androidapp`: Android Demo application.
 
 ## 🚀 Quick Start
 
 ### Running the Demo App
 
-- **Android**: `./gradlew :androidApp:assembleDebug`
+- **Android**: `./gradlew :composeApp:assembleDebug`
 - **Desktop**: `./gradlew :composeApp:run`
 - **Web (Wasm)**: `./gradlew :composeApp:wasmJsBrowserDevelopmentRun`
 - **iOS**: Open `iosApp/iosApp.xcworkspace` in Xcode to run.

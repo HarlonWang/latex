@@ -39,7 +39,7 @@ import com.hrm.latex.parser.model.LatexNode
 import com.hrm.latex.renderer.layout.LatexRenderer
 import com.hrm.latex.renderer.model.LatexConfig
 import com.hrm.latex.renderer.model.LatexFontFamilies
-import com.hrm.latex.renderer.model.defaultLatexFontFamilies
+import com.hrm.latex.renderer.model.resolveFontFamilies
 import com.hrm.latex.renderer.model.resolveThemeColors
 import com.hrm.latex.renderer.model.toContext
 import kotlin.math.ceil
@@ -88,7 +88,8 @@ private const val TAG = "LatexExporter"
 class LatexExporterState internal constructor(
     private val density: Density,
     private val textMeasurer: androidx.compose.ui.text.TextMeasurer,
-    private val fontFamilies: LatexFontFamilies
+    private val fontFamilies: LatexFontFamilies,
+    private val defaultConfig: LatexConfig = LatexConfig()
 ) {
     // 复用解析器实例，保持原有导出路径的分配特征；每次独立导出前清空输入状态。
     private val parser = IncrementalLatexParser()
@@ -114,7 +115,7 @@ class LatexExporterState internal constructor(
      */
     fun export(
         latex: String,
-        config: LatexConfig = LatexConfig(),
+        config: LatexConfig = defaultConfig,
         exportConfig: ExportConfig = ExportConfig(),
         isDarkTheme: Boolean = false
     ): ExportResult? {
@@ -183,7 +184,7 @@ class LatexExporterState internal constructor(
      */
     fun exportSvg(
         latex: String,
-        config: LatexConfig = LatexConfig(),
+        config: LatexConfig = defaultConfig,
         exportConfig: SvgExportConfig = SvgExportConfig(),
         isDarkTheme: Boolean = false
     ): SvgExportResult? {
@@ -276,25 +277,25 @@ class LatexExporterState internal constructor(
  * 创建并记住 [LatexExporterState] 实例
  *
  * 必须在 Composable 作用域中调用，以获取 [TextMeasurer] 和 [Density]。
- * 导出与屏幕渲染共用内置 KaTeX TTF 字体集。
+ * 导出与屏幕渲染通过 LatexConfig 共用字体配置。
  *
- * @param config 可选的渲染配置（用于提前加载字体）
- * @param fontFamilies 公式字体集。默认使用内置 KaTeX 字体；传入自定义字体集即可不加载内置字体资源。
+ * @param config 默认渲染配置，后续测量/导出调用可显式覆盖；字体也从此配置加载
  * @return [LatexExporterState] 实例
  */
 @Composable
 fun rememberLatexExporter(
-    config: LatexConfig = LatexConfig(),
-    fontFamilies: LatexFontFamilies = defaultLatexFontFamilies()
+    config: LatexConfig = LatexConfig()
 ): LatexExporterState {
+    val fontFamilies = config.resolveFontFamilies()
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
 
-    val exporter = remember(density, textMeasurer, fontFamilies) {
+    val exporter = remember(density, textMeasurer, fontFamilies, config) {
         LatexExporterState(
             density = density,
             textMeasurer = textMeasurer,
-            fontFamilies = fontFamilies
+            fontFamilies = fontFamilies,
+            defaultConfig = config
         )
     }
 

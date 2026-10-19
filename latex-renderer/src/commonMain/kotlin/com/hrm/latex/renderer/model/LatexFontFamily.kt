@@ -128,21 +128,25 @@ data class LatexFontFamilies(
     }
 }
 
-private const val TAG = "LatexFontFamily"
-
 /**
  * 默认字体提供者。依赖 `latex-fonts-katex` 并调用 `KatexFonts.install()` 后使用内置 KaTeX 字体；
  * 未注册时退化为系统字体，保证不携带字体资源的宿主也能渲染。
  */
-public object LatexFontRegistry {
-    public var provider: (@Composable () -> LatexFontFamilies)? = null
+object LatexFontRegistry {
+    var provider: (@Composable () -> LatexFontFamilies)? = null
 }
 
 @Composable
 internal fun defaultLatexFontFamilies(): LatexFontFamilies =
     LatexFontRegistry.provider?.invoke() ?: systemLatexFontFamilies()
 
-private fun systemLatexFontFamilies(): LatexFontFamilies = LatexFontFamilies(
+/** 优先使用配置中的字体；仅在未指定时加载全局默认字体。 */
+@Composable
+internal fun LatexConfig.resolveFontFamilies(): LatexFontFamilies =
+    fontFamilies ?: defaultLatexFontFamilies()
+
+/** 系统字体集，可通过 [LatexConfig.fontFamilies] 覆盖已注册的全局默认字体。 */
+public fun systemLatexFontFamilies(): LatexFontFamilies = LatexFontFamilies(
     main = FontFamily.Default,
     math = FontFamily.Default,
     ams = FontFamily.Default,
