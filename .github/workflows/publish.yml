@@ -17,8 +17,11 @@
 # │                                                                  │
 # │ 模块间依赖保持本地项目引用 api(projects.latexXxx) 不变，         │
 # │ Gradle 会自动将 POM 中的依赖版本解析为当前 VERSION（别名版本），  │
-# │ 使别名版本的三个模块形成自洽的版本集合。                         │
+# │ 使别名版本的四个模块形成自洽的版本集合。                         │
 # └──────────────────────────────────────────────────────────────────┘
+#
+# publishAllPublicationsToMavenCentralRepository 会聚合所有应用发布插件的模块，
+# 包括可选的 latex-fonts-katex；无需单独重复执行字体模块的发布任务。
 #
 # 如何验证？
 #   在 GitHub Actions 的 publish-alias Job 日志中，每个修改步骤
@@ -70,6 +73,7 @@ jobs:
           echo "║    io.github.huarangmeng:latex-base:$VERSION"
           echo "║    io.github.huarangmeng:latex-parser:$VERSION"
           echo "║    io.github.huarangmeng:latex-renderer:$VERSION"
+          echo "║    io.github.huarangmeng:latex-fonts-katex:$VERSION (可选字体)"
           echo "╚══════════════════════════════════════╝"
 
       - name: Publish to MavenCentral
@@ -183,6 +187,8 @@ jobs:
           echo "║      └─ POM 依赖 → latex-base:${ALIAS_VERSION}"
           echo "║    io.github.huarangmeng:latex-renderer:${ALIAS_VERSION}"
           echo "║      └─ POM 依赖 → latex-parser:${ALIAS_VERSION}"
+          echo "║    io.github.huarangmeng:latex-fonts-katex:${ALIAS_VERSION} (可选字体)"
+          echo "║      └─ POM 依赖 → latex-renderer:${ALIAS_VERSION}"
           echo "║"
           echo "╚══════════════════════════════════════════════════════════════╝"
           echo ""
@@ -217,4 +223,6 @@ jobs:
           echo "      → 依赖 latex-base:${ALIAS_VERSION}"
           echo "    io.github.huarangmeng:latex-renderer:${ALIAS_VERSION}"
           echo "      → 依赖 latex-parser:${ALIAS_VERSION}"
+          echo "    io.github.huarangmeng:latex-fonts-katex:${ALIAS_VERSION} (可选字体)"
+          echo "      → 依赖 latex-renderer:${ALIAS_VERSION}"
           echo "=========================================="

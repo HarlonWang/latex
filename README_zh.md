@@ -230,16 +230,27 @@ fun MyScreen() {
 
 ### 数学字体
 
-内置 KaTeX TTF 字体集是渲染器唯一的数学字体管线。Main、Math、AMS、各风格
-字体、Size1–Size4 与 KaTeX metrics 会作为一个整体加载，保证测量与绘制使用
-同一组字体数据。
+`latex-renderer` 不携带字体文件，默认使用系统字体。需要 KaTeX TTF 字体时，
+额外依赖可选的 `latex-fonts-katex` 模块（见[安装](#-安装)），并在应用初始化时注册一次，
+早于任何公式 UI、测量器或导出器的创建：
 
 ```kotlin
-// 默认：内置 KaTeX TTF 字体
-LatexConfig()
+import com.hrm.latex.fonts.KatexFonts
+
+fun initializeLatexFonts() {
+    KatexFonts.install()
+}
 ```
 
-不支持外部字体注入，因为 KaTeX 排版 metrics 只适用于配套的内置字体文件。
+在应用启动代码中调用 `initializeLatexFonts()`。注册后全局影响渲染、测量、编辑器和导出；
+仅添加依赖不会自动启用 KaTeX 字体。
+
+如果希望使用系统字体并避免将字体资源打进应用，只依赖 `latex-renderer`，无需注册。
+系统字体的字形覆盖和度量随平台变化，不能保证与 KaTeX 相同的数学排版效果；
+当前布局引擎仍使用基于 KaTeX 的数学度量。
+
+**升级提示：** 原先随 `latex-renderer` 内置的字体现已拆分；要保留之前的 KaTeX 外观，
+需要同时添加可选依赖并调用 `KatexFonts.install()`。仅使用 `LatexConfig()` 不会启用内置字体。
 
 ### 主题配置
 
@@ -442,10 +453,14 @@ fun MyEditor() {
 
 | 变体 | Kotlin | Compose Multiplatform | 制品版本号 |
 |------|--------|-----------------------|-----------|
-| **标准版** | 2.3.10 | 1.10.3 | `1.5.0` |
-| **Kotlin 2.1.0 兼容版** | 2.1.0 | 1.9.3 | `1.5.0-kt2.1.0` |
+| **标准版** | 2.3.10 | 1.10.3 | `<version>` |
+| **Kotlin 2.1.0 兼容版** | 2.1.0 | 1.9.3 | `<version>-kt2.1.0` |
 
 > 请选择与你项目 Kotlin 版本匹配的变体。如果你的项目使用 **Kotlin 2.1.0**，请使用带 `-kt2.1.0` 后缀的版本。
+
+将下文的 `<version>` 替换为已发布的版本号。`latex-fonts-katex` 从包含字体模块拆分的
+首个发布版本起提供，`1.5.0` 等旧版本不含该制品。显式声明的所有 LaTeX 模块应使用
+相同版本号和相同变体。
 
 ### 标准版（Kotlin 2.3.10）
 
@@ -453,12 +468,14 @@ fun MyEditor() {
 
 ```toml
 [versions]
-latex = "1.5.0"
+latex = "<version>"
 
 [libraries]
 latex-base = { module = "io.github.huarangmeng:latex-base", version.ref = "latex" }
 latex-parser = { module = "io.github.huarangmeng:latex-parser", version.ref = "latex" }
 latex-renderer = { module = "io.github.huarangmeng:latex-renderer", version.ref = "latex" }
+# 可选：内置 KaTeX 字体
+latex-fonts-katex = { module = "io.github.huarangmeng:latex-fonts-katex", version.ref = "latex" }
 ```
 
 ### Kotlin 2.1.0 兼容版
@@ -467,31 +484,36 @@ latex-renderer = { module = "io.github.huarangmeng:latex-renderer", version.ref 
 
 ```toml
 [versions]
-latex = "1.5.0-kt2.1.0"
+latex = "<version>-kt2.1.0"
 
 [libraries]
 latex-base = { module = "io.github.huarangmeng:latex-base", version.ref = "latex" }
 latex-parser = { module = "io.github.huarangmeng:latex-parser", version.ref = "latex" }
 latex-renderer = { module = "io.github.huarangmeng:latex-renderer", version.ref = "latex" }
+# 可选：内置 KaTeX 字体，使用相同的兼容变体
+latex-fonts-katex = { module = "io.github.huarangmeng:latex-fonts-katex", version.ref = "latex" }
 ```
 
 ### 添加到模块
 
-在模块的 `build.gradle.kts` 中引用：
+需要 Compose 渲染时，在 KMP 模块的 `build.gradle.kts` 的 `commonMain.dependencies`
+中添加以下依赖（Android/JVM 单平台模块放在 `dependencies` 中）：
 
 ```kotlin
-dependencies {
-    implementation(libs.latex.base) // 基础日志
-    implementation(libs.latex.renderer) // 渲染逻辑
-    implementation(libs.latex.parser) // 解析逻辑
-}
+implementation(libs.latex.renderer) // 系统字体；已传递依赖 parser 和 base
+// 可选：不需要携带 KaTeX 字体资源时，省略这一行
+implementation(libs.latex.fonts.katex)
 ```
+
+引入可选字体后，还需按[数学字体](#数学字体)中的示例调用 `KatexFonts.install()`。
+如果只需要解析而不需要 Compose 渲染，仅依赖 `libs.latex.parser` 即可。
 
 ## 🏗️ 项目结构
 
 - `:latex-base`: 基础数据结构和接口。
 - `:latex-parser`: 核心解析引擎，负责将 LaTeX 字符串转换为 AST。
-- `:latex-renderer`: 负责将 AST 渲染为 Compose UI 组件。
+- `:latex-renderer`: 将 AST 渲染为 Compose UI 组件，默认使用系统字体，不携带字体资源。
+- `:latex-fonts-katex`: 可选的 KaTeX TTF 字体资源和注册 API，依赖 `latex-renderer`。
 - `:latex-preview`: 预览组件和示例数据集。
 - `:composeApp`: 跨平台 Demo 应用程序。
 - `:androidApp`: Android Demo 应用程序。
