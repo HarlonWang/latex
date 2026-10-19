@@ -231,33 +231,33 @@ fun MyScreen() {
 ### 数学字体
 
 > [!WARNING]
-> **强烈建议添加并启用配套的 `latex-fonts-katex` 字体库。**
+> **强烈建议添加配套的 `latex-fonts-katex` 字体库。**
 > 布局引擎使用 KaTeX 专用数学度量。使用其他字体可能出现缺字、符号或重音错位、
 > 上下标间距异常及括号缩放失真，**不使用配套字体时无法保证渲染正确性。**
 
-`latex-renderer` 默认使用系统字体，不携带字体文件。需要 KaTeX 字体时，
-添加可选的 `latex-fonts-katex` 依赖（见[安装](#-安装)），在 Composable 中配置：
+添加可选的 `latex-fonts-katex` 依赖（见[安装](#-安装)）即可自动使用 KaTeX。
+**无需手动初始化。** 字体模块只提供资源，
+由 renderer 在运行时读取，不引用可选模块中的类。
 
 ```kotlin
-import androidx.compose.runtime.Composable
-import com.hrm.latex.fonts.katexFontFamilies
-import com.hrm.latex.renderer.Latex
-import com.hrm.latex.renderer.model.LatexConfig
-
-@Composable
-fun Formula() {
-    val config = LatexConfig(fontFamilies = katexFontFamilies())
-    Latex(latex = "E = mc^2", config = config)
+commonMain.dependencies {
+    implementation(libs.latex.renderer)
+    implementation(libs.latex.fonts.katex)
 }
 ```
 
+直接使用默认配置 `Latex(latex = "E = mc^2")` 即可。首次请求会启动一次共享的异步加载：
+加载期间使用系统字体，成功后自动更新正在显示的公式。每个字体资源在进程内只读取一次，
+成功与失败结果均缓存；重组、新建页面和并发请求都不会重复加载。
+
+支持不引入或 exclude 字体模块：资源不存在或加载失败时安全回退到系统字体，不会因此崩溃。
+一次失败后不再重试，直到进程重启。Web 应用需要确保首次请求字体时资源已可访问。
+
+显式设置 `LatexConfig.fontFamilies` 的优先级最高，且会跳过自动加载。
+例如 `LatexConfig(fontFamilies = systemLatexFontFamilies())` 始终使用系统字体；
+`systemLatexFontFamilies` 位于 `com.hrm.latex.renderer.model` 包中。
 将同一份 config 传给 `LatexAutoWrap`、`LatexEditor`、`rememberLatexMeasurer` 和
 `rememberLatexExporter`，即可保持字体一致。
-
-如果希望全局默认使用 KaTeX，也可在应用初始化时调用一次
-`com.hrm.latex.fonts.KatexFonts.install()`。显式配置的 `fontFamilies` 优先；
-通过 `com.hrm.latex.renderer.model` 中的 `systemLatexFontFamilies()` 可指定系统字体。
-仅添加依赖不会自动启用 KaTeX。
 
 ### 主题配置
 
@@ -487,15 +487,15 @@ commonMain.dependencies {
 ```
 
 Android/JVM 单平台模块将依赖放在 `dependencies` 中。
-字体依赖虽然可选，但省略后可能导致渲染异常；启用方式见[数学字体](#数学字体)。
+字体依赖虽然可选，但省略后可能导致排版差异；引入后自动启用，无需初始化，见[数学字体](#数学字体)。
 只需要解析时，仅依赖 `libs.latex.parser`。
 
 ## 🏗️ 项目结构
 
 - `:latex-base`: 基础数据结构和接口。
 - `:latex-parser`: 核心解析引擎，负责将 LaTeX 字符串转换为 AST。
-- `:latex-renderer`: 将 AST 渲染为 Compose UI 组件，默认使用系统字体，不携带字体资源。
-- `:latex-fonts-katex`: 可选的 KaTeX TTF 字体资源和注册 API，依赖 `latex-renderer`。
+- `:latex-renderer`: 将 AST 渲染为 Compose UI 组件，自动加载可选的 KaTeX 资源，缺失时回退系统字体。
+- `:latex-fonts-katex`: 可选的 KaTeX TTF 字体资源，不依赖 renderer，也不提供初始化 API。
 - `:latex-preview`: 预览组件和示例数据集。
 - `:composeApp`: 跨平台 Demo 应用程序。
 - `:androidapp`: Android Demo 应用程序。

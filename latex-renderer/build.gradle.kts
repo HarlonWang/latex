@@ -72,12 +72,14 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:${libs.versions.kotlinx.coroutines.get()}")
         }
         jvmMain.dependencies {
             implementation(libs.kotlinx.coroutinesSwing)
         }
         jvmTest.dependencies {
             implementation(compose.desktop.currentOs)
+            runtimeOnly(projects.latexFontsKatex)
         }
     }
 }

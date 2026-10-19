@@ -223,8 +223,8 @@ data class LatexConfig(
     /**
      * 公式字体集，同时用于渲染、测量、编辑器和导出。
      *
-     * null 表示在 Compose 入口解析默认字体：注册了可选 KaTeX 模块时使用 KaTeX，
-     * 否则使用系统字体。显式传入时不会加载默认字体资源。
+     * null 表示在 Compose 入口按需加载可选 KaTeX 资源；成功后自动刷新公式，
+     * 缺失或加载失败时使用系统字体，进程内不再重试。显式传入时不会加载默认字体资源。
      */
     val fontFamilies: LatexFontFamilies? = null,
 )

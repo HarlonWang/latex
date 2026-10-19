@@ -43,15 +43,17 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            api(projects.latexRenderer)
             implementation(libs.compose.runtime)
-            implementation(libs.compose.ui)
             implementation(libs.compose.components.resources)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
         }
     }
+}
+
+compose.resources {
+    packageOfResClass = "com.hrm.latex.fonts.katex.resources"
 }
 
 mavenPublishing {
@@ -69,7 +71,7 @@ mavenPublishing {
         name.set("KaTeX fonts for the Kotlin Multiplatform LaTeX renderer")
         description.set(
             "Optional bundled KaTeX TTF fonts for latex-renderer. " +
-                "Depend on this artifact and call KatexFonts.install() to keep the bundled font fidelity; " +
+                "Resource-only module: fonts are loaded automatically when present; " +
                 "skip it to ship a smaller app and render with system fonts."
         )
         inceptionYear.set("2026")

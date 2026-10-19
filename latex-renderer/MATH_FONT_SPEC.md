@@ -1,13 +1,17 @@
 # KaTeX 数学字体架构
 
-## 唯一字体管线
+## 字体解析管线
 
-Renderer 只使用随库发布的 KaTeX TTF 字体集。字体文件、逐字形度量、
-TeX 布局参数和字形路由策略作为一个不可拆分的配置使用。公开 API 不接受
-外部字体文件或自定义字体家族。
+`LatexConfig.fontFamilies` 显式配置优先；未指定时，renderer 首次使用默认字体会异步读取
+可选 `latex-fonts-katex` 模块的资源。加载期间使用系统字体，完整加载成功后更新所有使用默认字体的入口。
+无需调用安装或注册 API，字体模块本身不包含注册代码，也不依赖 renderer。
 
-`LatexConfig` 不提供字体配置项。渲染入口始终通过 `TtfFontSetProvider`
-与 `defaultLatexFontFamilies()` 使用内置 KaTeX TTF。
+默认加载器使用进程级共享任务：每个资源只读取一次，成功和失败都缓存。资源缺失、读取失败或
+字体构建失败时保留系统字体，不向渲染入口抛出异常，也不会在重组、切换页面或后续请求时重试。
+共享任务不依附页面生命周期，取消某个等待者不会取消加载。
+
+显式配置 `systemLatexFontFamilies()` 可以跳过默认资源加载。布局、绘制和导出使用同一份
+解析后的字体配置；KaTeX 的字形度量适用于配套 TTF，系统字体可能存在排版差异。
 
 ## 字体角色
 
@@ -33,5 +37,7 @@ TeX 布局参数和字形路由策略作为一个不可拆分的配置使用。�
 
 ## 资源要求
 
-`composeResources/font` 中只允许 `katex_*.ttf` 资源。新增或替换字体时，必须同步更新
-字形度量、路由、可视化预览与 renderer 测试，不得从 `LatexConfig` 注入字体。
+字体模块中的 `composeResources/font/katex_*.ttf` 打包在固定路径：
+`composeResources/com.hrm.latex.fonts.katex.resources/font/`。
+这个路径由字体模块的 `packageOfResClass` 和 renderer 的资源读取代码共同约定；renderer 不引用
+可选模块的生成类。新增或替换字体时，必须同步更新字形度量、路由、可视化预览与 renderer 测试。

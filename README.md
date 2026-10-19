@@ -231,35 +231,38 @@ fun MyScreen() {
 ### Math Fonts
 
 > [!WARNING]
-> **We strongly recommend adding and enabling the bundled `latex-fonts-katex` fonts.**
+> **We strongly recommend adding the bundled `latex-fonts-katex` fonts.**
 > The layout engine uses KaTeX-specific math metrics. Other fonts may cause missing
 > glyphs, misaligned symbols or accents, incorrect script spacing, and distorted
 > delimiter sizing. **Correct rendering is not guaranteed without the matching fonts.**
 
-`latex-renderer` uses system fonts by default and bundles no font files.
-For KaTeX fonts, add the optional `latex-fonts-katex` dependency (see
-[Installation](#-installation)) and configure them in a Composable:
+Add the optional `latex-fonts-katex` dependency (see [Installation](#-installation))
+to use KaTeX automatically. **No manual initialization is needed.** The font module contains resources only; the renderer loads them
+at runtime without referencing classes from that module.
 
 ```kotlin
-import androidx.compose.runtime.Composable
-import com.hrm.latex.fonts.katexFontFamilies
-import com.hrm.latex.renderer.Latex
-import com.hrm.latex.renderer.model.LatexConfig
-
-@Composable
-fun Formula() {
-    val config = LatexConfig(fontFamilies = katexFontFamilies())
-    Latex(latex = "E = mc^2", config = config)
+commonMain.dependencies {
+    implementation(libs.latex.renderer)
+    implementation(libs.latex.fonts.katex)
 }
 ```
 
-Reuse this config with `LatexAutoWrap`, `LatexEditor`, `rememberLatexMeasurer`,
-and `rememberLatexExporter` for consistent fonts.
+Use `Latex(latex = "E = mc^2")` with the default config. The first request starts
+one shared asynchronous font load. System fonts are used while loading; successful
+loading updates the active renderers. Each font resource is read once per process,
+and both success and failure are cached. Recomposition, new views, and concurrent
+requests do not trigger another load.
 
-To make KaTeX the global default, call `com.hrm.latex.fonts.KatexFonts.install()`
-once during app initialization instead. Explicit `fontFamilies` takes priority;
-use `systemLatexFontFamilies()` from `com.hrm.latex.renderer.model` to select
-system fonts even after registration. Adding the dependency alone does not enable KaTeX.
+Omitting or excluding the font module is supported: missing resources or loading
+failures fall back to system fonts without crashing. A failed attempt is not retried
+until the process restarts. Web apps must make the font resources available before
+the first formula requests them.
+
+Explicit `LatexConfig.fontFamilies` takes priority and bypasses automatic loading.
+For example, `LatexConfig(fontFamilies = systemLatexFontFamilies())` always selects
+system fonts (`systemLatexFontFamilies` is in `com.hrm.latex.renderer.model`).
+Reuse the config with `LatexAutoWrap`, `LatexEditor`, `rememberLatexMeasurer`, and
+`rememberLatexExporter` for consistent fonts.
 
 ### Theme Configuration
 
@@ -491,15 +494,16 @@ commonMain.dependencies {
 
 For Android/JVM-only modules, put these dependencies in `dependencies`.
 The font dependency is optional, but omitting it may cause rendering issues.
-To enable KaTeX, follow [Math Fonts](#math-fonts). For parsing only, depend on
+KaTeX loads automatically when the dependency is present; no initialization is needed.
+See [Math Fonts](#math-fonts). For parsing only, depend on
 `libs.latex.parser`.
 
 ## 🏗️ Project Structure
 
 - `:latex-base`: Base data structures and interfaces.
 - `:latex-parser`: Core parsing engine, responsible for converting LaTeX strings to AST.
-- `:latex-renderer`: Renders AST into Compose UI components; defaults to system fonts without bundling font resources.
-- `:latex-fonts-katex`: Optional KaTeX TTF resources and registration API; depends on `latex-renderer`.
+- `:latex-renderer`: Renders AST into Compose UI components; automatically loads optional KaTeX resources, falling back to system fonts.
+- `:latex-fonts-katex`: Optional KaTeX TTF resources; no renderer dependency or initialization API.
 - `:latex-preview`: Preview components and sample datasets.
 - `:composeApp`: Cross-platform Demo application.
 - `:androidapp`: Android Demo application.

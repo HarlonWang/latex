@@ -2,6 +2,7 @@ package com.hrm.latex.renderer.model
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.font.FontFamily
+import com.hrm.latex.renderer.font.rememberDefaultLatexFonts
 
 /**
  * LaTeX 字体家族配置（基于 KaTeX 字体）
@@ -128,24 +129,16 @@ data class LatexFontFamilies(
     }
 }
 
-/**
- * 默认字体提供者。依赖 `latex-fonts-katex` 并调用 `KatexFonts.install()` 后使用内置 KaTeX 字体；
- * 未注册时退化为系统字体，保证不携带字体资源的宿主也能渲染。
- */
-object LatexFontRegistry {
-    var provider: (@Composable () -> LatexFontFamilies)? = null
-}
-
 @Composable
 internal fun defaultLatexFontFamilies(): LatexFontFamilies =
-    LatexFontRegistry.provider?.invoke() ?: systemLatexFontFamilies()
+    rememberDefaultLatexFonts()
 
 /** 优先使用配置中的字体；仅在未指定时加载全局默认字体。 */
 @Composable
 internal fun LatexConfig.resolveFontFamilies(): LatexFontFamilies =
     fontFamilies ?: defaultLatexFontFamilies()
 
-/** 系统字体集，可通过 [LatexConfig.fontFamilies] 覆盖已注册的全局默认字体。 */
+/** 系统字体集；通过 [LatexConfig.fontFamilies] 显式配置时不会尝试加载默认字体。 */
 public fun systemLatexFontFamilies(): LatexFontFamilies = LatexFontFamilies(
     main = FontFamily.Default,
     math = FontFamily.Default,
