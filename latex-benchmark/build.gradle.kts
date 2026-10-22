@@ -72,6 +72,16 @@ tasks.register<JavaExec>("performanceBenchmark") {
         layout.buildDirectory.dir("benchmarks/main/resources"),
         sourceSets.main.get().runtimeClasspath
     )
+    val profile = providers.gradleProperty("benchmarkProfile").orElse("full").get()
+    require(profile == "full" || profile == "ci") { "benchmarkProfile 只支持 full 或 ci" }
+    val isCi = profile == "ci"
+    // CI 保留所有测量阶段，每个参数维度选一组代表值，减少独立 JVM 的启动次数。
+    if (isCi) {
+        args(
+            "-p", "input=large", "-p", "edit=replace", "-p", "scenario=streaming",
+            "-p", "chunkSize=16", "-p", "entries=1000"
+        )
+    }
     val report = providers.gradleProperty("benchmarkReport")
         .map { rootProject.file(it) }
         .orElse(layout.buildDirectory.file("reports/performance/jmh.json").map { it.asFile })
@@ -79,10 +89,10 @@ tasks.register<JavaExec>("performanceBenchmark") {
         providers.gradleProperty("benchmarkInclude").orElse(
             "com.hrm.latex.benchmark.*Benchmark.*"
         ).get(),
-        "-wi", providers.gradleProperty("benchmarkWarmups").orElse("3").get(),
-        "-i", providers.gradleProperty("benchmarkIterations").orElse("5").get(),
-        "-w", providers.gradleProperty("benchmarkIterationMs").orElse("500").get() + "ms",
-        "-r", providers.gradleProperty("benchmarkIterationMs").orElse("500").get() + "ms",
+        "-wi", providers.gradleProperty("benchmarkWarmups").orElse(if (isCi) "1" else "3").get(),
+        "-i", providers.gradleProperty("benchmarkIterations").orElse(if (isCi) "2" else "5").get(),
+        "-w", providers.gradleProperty("benchmarkIterationMs").orElse(if (isCi) "100" else "500").get() + "ms",
+        "-r", providers.gradleProperty("benchmarkIterationMs").orElse(if (isCi) "100" else "500").get() + "ms",
         "-f", providers.gradleProperty("benchmarkForks").orElse("1").get(),
         "-t", "1", "-tu", "ms", "-rf", "json", "-rff", report.get().absolutePath,
         "-foe", "true"

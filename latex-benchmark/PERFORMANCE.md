@@ -46,11 +46,11 @@ python3 latex-benchmark/report_performance.py \
   --output latex-benchmark/build/reports/performance/summary.md
 ```
 
-CI 使用同一入口的短采样，覆盖全部组合。短迭代用于发现明显异常，接近阈值时应增加预热、迭代或 fork 复核：
+CI 使用同一入口的代表集：保留 13 类的全部测量方法，将参数收敛为长公式、中间替换、16 字符流式块、流式测量和 1000 条编辑器布局，共 33 组；1 次预热、2 次测量，每次 100ms。长公式会实际触发自动换行。完整 124 组保留用于深入复测，短迭代只用于发现明显异常：
 
 ```sh
 ./gradlew :latex-benchmark:performanceBenchmark \
-  -PbenchmarkWarmups=2 -PbenchmarkIterations=3 -PbenchmarkIterationMs=200
+  -PbenchmarkProfile=ci
 ```
 
 可通过 `benchmarkInclude` 按 JMH 名称筛选；例如只排查解析和测量：
@@ -59,6 +59,8 @@ CI 使用同一入口的短采样，覆盖全部组合。短迭代用于发现�
 ./gradlew :latex-benchmark:performanceBenchmark \
   '-PbenchmarkInclude=com.hrm.latex.benchmark.(ParserBenchmark|RendererMeasureBenchmark).*'
 ```
+
+CI 的 JVM 单元测试、JS/Wasm 浏览器验证和性能报告并行执行；单元测试全部通过才算成功，性能 GOOD/BAD 不作门禁。缓存 Gradle 构建状态、Node/Yarn 工具链与 NPM 下载，减少重复初始化。目标是常规运行在 3 分钟内结束；首次缓存填充和共享 runner 排队仍需看 Actions 实测，不能通过截断测试满足时限。
 
 报告按阶段展示均值 ± JMH scoreError、有效 B/op、GC 次数与时间，不把迭代均值称为单次调用 p95。原始 JSON、日志和生成报告均位于忽略的 `build/reports/performance/`，不随源码提交。CI 将报告写入 Actions 运行摘要，并上传 `performance-reports` 附件。
 
@@ -81,4 +83,4 @@ GOOD 和 BAD 均正常退出；报告损坏或基线不可比较时非零退出�
 python3 -m unittest discover -s latex-benchmark -p 'test_report_performance.py'
 ```
 
-可调整参数：`benchmarkWarmups`、`benchmarkIterations`、`benchmarkIterationMs`、`benchmarkForks`、`benchmarkInclude`、`benchmarkReport`（输出 JSON 路径）、`benchmarkGc`（默认 true）。只有一个专用执行入口和一个报告脚本，不另设缓存专用流程。
+可调整参数：`benchmarkProfile`（`full` 或 `ci`）、`benchmarkWarmups`、`benchmarkIterations`、`benchmarkIterationMs`、`benchmarkForks`、`benchmarkInclude`、`benchmarkReport`（输出 JSON 路径）、`benchmarkGc`（默认 true）。只有一个专用执行入口和一个报告脚本，不另设缓存专用流程。

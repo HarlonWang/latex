@@ -21,9 +21,9 @@ defaults:
 jobs:
   # 单元测试是门禁：执行全仓 JVM 测试，任何测试失败都会使工作流失败。
   unit-tests:
-    name: 单元测试与跨平台验证
+    name: 全量 JVM 单元测试
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
 
     steps:
       - name: 检出代码
@@ -34,7 +34,9 @@ jobs:
         with:
           distribution: zulu
           java-version: 21
-          cache: gradle
+
+      - name: 缓存 Gradle 构建状态
+        uses: gradle/actions/setup-gradle@v4
 
       - name: 授予 Gradle 执行权限
         run: chmod +x ./gradlew
@@ -45,34 +47,7 @@ jobs:
       - name: 运行全仓 JVM 单元测试
         run: ./gradlew jvmTest --console=plain
 
-      - name: 编译解析器与渲染器的 JS 和 Wasm 测试
-        run: >-
-          ./gradlew
-          :latex-parser:compileTestKotlinJs :latex-parser:compileTestKotlinWasmJs
-          :latex-renderer:compileTestKotlinJs :latex-renderer:compileTestKotlinWasmJs
-          --console=plain
-
-      - name: 在 Chrome 中验证 JS 和 Wasm 对象身份
-        run: |
-          CHROME_BIN="$(command -v google-chrome)"
-          export CHROME_BIN
-          ./gradlew \
-            :latex-renderer:jsBrowserTest --tests '*LayoutIdentityTest*' \
-            :latex-renderer:wasmJsBrowserTest --tests '*LayoutIdentityTest*' \
-            --console=plain
-          # 浏览器筛选为空也可能返回成功，因此额外确认两个目标确实执行了用例。
-          python3 - <<'PY'
-          from pathlib import Path
-          import xml.etree.ElementTree as ET
-          for target in ("jsBrowserTest", "wasmJsBrowserTest"):
-              reports = Path("latex-renderer/build/test-results", target).glob("TEST-*.xml")
-              count = sum(int(ET.parse(report).getroot().get("tests", 0)) for report in reports)
-              if count < 2:
-                  raise SystemExit(f"{target}: 预期至少执行 2 项身份哈希测试，实际 {count}")
-              print(f"{target}: 已执行 {count} 项测试")
-          PY
-
-      - name: 保存单元测试与浏览器测试报告
+      - name: 保存单元测试报告
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -82,11 +57,83 @@ jobs:
             **/build/test-results/**
           retention-days: 14
 
+  browser-tests:
+    name: 浏览器单元测试（${{ matrix.target }}）
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: jsBrowserTest
+            compiler: Js
+          - target: wasmJsBrowserTest
+            compiler: WasmJs
+    env:
+      YARN_CACHE_FOLDER: ${{ runner.temp }}/latex-yarn-cache
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 21
+
+      - name: 缓存 Gradle 与浏览器工具链
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-home-cache-includes: |
+            caches
+            notifications
+            nodejs
+            yarn
+
+      - name: 缓存 NPM 依赖
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.YARN_CACHE_FOLDER }}
+          key: ${{ runner.os }}-yarn-${{ matrix.compiler }}-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', 'gradle.properties') }}
+          restore-keys: ${{ runner.os }}-yarn-${{ matrix.compiler }}-
+
+      - name: 编译平台测试并验证对象身份
+        run: |
+          chmod +x ./gradlew
+          CHROME_BIN="$(command -v google-chrome)"
+          export CHROME_BIN
+          ./gradlew \
+            :latex-parser:compileTestKotlin${{ matrix.compiler }} \
+            :latex-renderer:${{ matrix.target }} --tests '*LayoutIdentityTest*' \
+            --console=plain
+          # 筛选为空也可能成功，额外确认实际执行了测试。
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          target = "${{ matrix.target }}"
+          reports = Path("latex-renderer/build/test-results", target).glob("TEST-*.xml")
+          count = sum(int(ET.parse(report).getroot().get("tests", 0)) for report in reports)
+          if count < 2:
+              raise SystemExit(f"{target}: 预期至少 2 项身份测试，实际 {count}")
+          print(f"{target}: 已执行 {count} 项测试")
+          PY
+
+      - name: 保存浏览器测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-test-reports-${{ matrix.compiler }}
+          path: |
+            latex-renderer/build/reports/tests/${{ matrix.target }}/**
+            latex-renderer/build/test-results/${{ matrix.target }}/**
+          retention-days: 14
+
   # 性能仅报告 GOOD/BAD，不作合入门禁；采样异常仍保留失败步骤、警告和产物。
   performance:
-    name: 全链路性能报告
+    name: 全链路性能报告（CI 代表集）
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     continue-on-error: true
 
     steps:
@@ -98,7 +145,9 @@ jobs:
         with:
           distribution: zulu
           java-version: 21
-          cache: gradle
+
+      - name: 缓存 Gradle 构建状态
+        uses: gradle/actions/setup-gradle@v4
 
       - name: 授予 Gradle 执行权限
         run: chmod +x ./gradlew
@@ -107,7 +156,7 @@ jobs:
         run: |
           mkdir -p latex-benchmark/build/reports/performance
           ./gradlew :latex-benchmark:performanceBenchmark \
-            -PbenchmarkWarmups=2 -PbenchmarkIterations=3 -PbenchmarkIterationMs=200 \
+            -PbenchmarkProfile=ci \
             -PbenchmarkGc=true --console=plain 2>&1 \
             | tee latex-benchmark/build/reports/performance/benchmark.log
 
