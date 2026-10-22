@@ -1,6 +1,7 @@
 package com.hrm.latex.renderer.measure
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.graphics.PixelMap
 import androidx.compose.ui.graphics.toComposeImageBitmap
@@ -56,6 +57,26 @@ class LatexInlineContentRenderTest {
         val dimensions = assertNotNull(measurer.measure(formula, config))
         assertEquals(dimensions.widthPx / density.density, inline.placeholder.width.value)
         assertEquals(dimensions.heightPx / density.density, inline.placeholder.height.value)
+    }
+
+    @Test
+    fun inlineContentSwappedAtSameSlotDrawsNewFormula() {
+        // 流式输出时同一个占位 id 下的公式会变，组合位置不变也必须画新公式
+        val measurer = measurer()
+        val first = assertNotNull(measurer.inlineContent("x", config))
+        val second = assertNotNull(measurer.inlineContent(formula, config))
+        val dimensions = assertNotNull(measurer.measure(formula, config))
+        val width = ceil(dimensions.widthPx).toInt()
+        val height = ceil(dimensions.heightPx).toInt()
+
+        val current = mutableStateOf(first)
+        val swappedPixels = ImageComposeScene(width, height, density) { current.value.children("") }.use { scene ->
+            scene.render(0)
+            current.value = second
+            scene.render(16_000_000L).toComposeImageBitmap().toPixelMap()
+        }
+        val expectedPixels = renderFrames(width, height, frames = 1) { second.children("") }
+        assertEquals(expectedPixels.pixels(), swappedPixels.pixels())
     }
 
     private fun renderFrames(width: Int, height: Int, frames: Int, content: @Composable () -> Unit): PixelMap =

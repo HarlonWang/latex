@@ -338,7 +338,8 @@ internal fun MeasuredLatex.toInlineTextContent(
     )
 ) {
     val isDark = isSystemInDarkTheme()
-    val measured = remember(isDark) {
+    // 以 this 为 key：调用方在同一组合位置换成另一个公式的内容时，不能沿用旧结果
+    val measured = remember(this, isDark) {
         if (isDark == measuredInDarkTheme) this else remeasure(isDark) ?: this
     }
     val description = remember(measured) {
