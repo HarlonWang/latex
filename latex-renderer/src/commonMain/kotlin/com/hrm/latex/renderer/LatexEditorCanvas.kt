@@ -101,13 +101,13 @@ fun LatexEditorCanvas(
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
 
-    // NodeLayout 缓存：仅在 config 启用时创建，跨渲染周期复用相同 AST 子树+上下文的测量结果
+    // 增量节点缓存：复用保留的 AST 实例；测量环境变化时由渲染器失效。
     val layoutCache = remember(config.enableLayoutCache) {
         if (config.enableLayoutCache) LayoutCache() else null
     }
 
     // 测量，同时填充 layoutMap
-    val renderResult = remember(children, context, density) {
+    val renderResult = remember(children, context, density, measurer, layoutCache, layoutMap) {
         layoutMap?.clear()
         LatexRenderer.measure(children, context, measurer, density, layoutMap = layoutMap, cache = layoutCache)
     }

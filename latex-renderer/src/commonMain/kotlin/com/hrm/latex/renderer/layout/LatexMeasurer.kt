@@ -106,8 +106,8 @@ private object MeasurerRegistry {
 /**
  * 测量节点尺寸与布局
  *
- * @param cache 可选的布局缓存。当非 null 时，相同 AST 节点 + 相同 RenderContext
- *   的测量结果会被缓存，避免重复测量。由 [LatexRenderer.measure] 传入。
+ * @param cache 可选的布局缓存。复用同一 AST 实例在相同样式和测量环境下的结果，
+ *   编号、引用及其祖先除外。由 [LatexRenderer.measure] 绑定环境后传入。
  */
 internal fun measureNode(
     node: LatexNode, context: RenderContext, measurer: TextMeasurer, density: Density,

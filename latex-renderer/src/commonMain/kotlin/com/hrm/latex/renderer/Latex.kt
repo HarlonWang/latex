@@ -237,13 +237,13 @@ private fun LatexDocument(
         if (onNodeClick != null || onHyperlinkClick != null) LayoutMap() else null
     }
 
-    // NodeLayout 缓存：仅在 config 启用时创建，跨渲染周期复用相同 AST 子树+上下文的测量结果
+    // 增量节点缓存：复用保留的 AST 实例；测量环境变化时由渲染器失效。
     val layoutCache = remember(enableLayoutCache) {
         if (enableLayoutCache) LayoutCache() else null
     }
 
     // 使用 LatexRenderer 共享逻辑进行测量（与导出路径共用同一份代码）
-    val renderResult = remember(children, context, density, highlightRanges) {
+    val renderResult = remember(children, context, density, measurer, highlightRanges, layoutCache, layoutMap) {
         layoutMap?.clear()
         LatexRenderer.measure(children, context, measurer, density, highlightRanges, layoutMap, layoutCache)
     }

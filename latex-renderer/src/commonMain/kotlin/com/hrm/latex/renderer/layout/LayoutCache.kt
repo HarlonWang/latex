@@ -22,174 +22,233 @@
 
 package com.hrm.latex.renderer.layout
 
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.unit.Density
 import com.hrm.latex.parser.model.LatexNode
 import com.hrm.latex.renderer.model.RenderContext
 
 /**
- * NodeLayout 缓存：相同 AST 子树 + 相同 RenderContext → 复用 layout，避免重复测量。
+ * 单个渲染器持有的有界布局缓存，复用不可变 AST 节点实例。
  *
- * 缓存 key 设计：
- * - LatexNode 是 data class，其 equals/hashCode 基于结构内容（子节点、属性等）。
- * - RenderContext 是 data class，其 equals/hashCode 覆盖所有影响布局的属性
- *   （fontSize, fontFamily, mathStyle 等）。
- * - 二者组合后天然具备"相同输入 → 相同输出"的语义，无需自定义 key。
+ * 缓存键按引用身份比较 AST 和字体资源，不递归哈希节点或字体字节。
+ * 结构相同的新 AST 实例会重新测量，增量解析保留的实例可继续复用。
+ * 所属组合在多轮测量间保留缓存；[beginMeasure] 将像素布局绑定到
+ * TextMeasurer、屏幕密度和字体缩放，环境变化时清空缓存。
  *
- * 生命周期：
- * - 每次顶层 `LatexRenderer.measure()` 调用前创建新的 LayoutCache 实例。
- * - 同一个测量周期内，相同子树+上下文的重复测量（如同一符号在不同位置出现）
- *   命中缓存直接返回。
- * - 跨测量周期通过 `invalidate()` 选择性失效或整体丢弃。
+ * 编号环境、引用及其祖先依赖文档状态，每轮重新测量，保证编号计数推进。
+ * 这些节点的纯子节点仍可复用。每轮重置可缓存性分类，避免保留历次编辑的 AST。
  *
- * 容量策略：
- * - 默认最大容量 2048 个条目，覆盖绝大多数公式场景。
- * - 超出容量时采用 LRU 淘汰最久未使用的条目。
- *
- * 线程安全：
- * - LayoutCache 仅在 Composition 主线程使用（measureNode/measureGroup 在主线程调用），
- *   不需要同步。
+ * 仅在组合线程使用，无需同步。缓存存续期间，AST 列表和字体字节必须保持不变。
  */
-internal class LayoutCache(
-    private val maxSize: Int = DEFAULT_MAX_SIZE
-) {
-    /**
-     * 缓存 key：节点 + 影响布局的上下文。
-     *
-     * 使用 [LatexNode] 的 data class equals 和 [RenderContext] 的 data class equals。
-     *
-     * 注意：equationNumbering 字段被排除在 key 之外，因为：
-     * 1. 它是 mutable class（非 data class），reference equality 导致跨测量周期永远不命中
-     * 2. 公式编号不影响子节点的布局尺寸（仅影响外层 wrap）
-     * 通过使用不含 equationNumbering 的 context 副本作为 key，确保增量场景命中率。
-     */
-    private data class CacheKey(
-        val node: LatexNode,
-        val context: RenderContext
-    )
-
-    /**
-     * 节点列表的缓存 key，用于 measureGroup 级别的缓存。
-     */
-    private data class GroupCacheKey(
-        val nodes: List<LatexNode>,
-        val context: RenderContext
-    )
-
-    /**
-     * 从 context 中移除不影响节点布局的临时字段，生成稳定的缓存 key 用 context。
-     */
-    private fun normalizeContext(context: RenderContext): RenderContext {
-        return if (context.equationNumbering != null) {
-            context.copy(equationNumbering = null)
-        } else {
-            context
-        }
-    }
-
-    // 跨平台 LRU 缓存（LinkedHashMap 的 accessOrder 和 removeEldestEntry 是 JVM 特有 API）
+internal class LayoutCache(maxSize: Int = DEFAULT_MAX_SIZE) {
+    private val enabled = maxSize > 0
     private val nodeCache = LruCache<CacheKey, NodeLayout>(maxSize)
-    private val groupCache = LruCache<GroupCacheKey, NodeLayout>(maxSize / 4)
+    private val cacheability = HashMap<NodeIdentity, Boolean>()
+    private var textMeasurer: TextMeasurer? = null
+    private var density: Float? = null
+    private var fontScale: Float? = null
 
-    // ── 统计信息（调试用）──
     var hits: Int = 0
         private set
     var misses: Int = 0
         private set
+    /** 因容量为零或子树依赖文档状态而跳过的查询，不计入命中或未命中。 */
+    var bypasses: Int = 0
+        private set
 
-    /**
-     * 查询单节点缓存。
-     *
-     * @return 缓存的 NodeLayout，未命中时返回 null
-     */
+    /** 每轮完整测量前调用，包括 AST 已发生变化的情况。 */
+    fun beginMeasure(measurer: TextMeasurer, density: Density) {
+        if (textMeasurer !== measurer || this.density != density.density || fontScale != density.fontScale) {
+            clear()
+            textMeasurer = measurer
+            this.density = density.density
+            fontScale = density.fontScale
+        }
+        cacheability.clear()
+    }
+
     fun getNode(node: LatexNode, context: RenderContext): NodeLayout? {
-        val key = CacheKey(node, normalizeContext(context))
-        val cached = nodeCache[key]
+        if (!enabled) {
+            bypasses++
+            return null
+        }
+        val cached = nodeCache[CacheKey(node, context)]
+        // 缓存只保存纯节点；同一不可变实例命中后，无需再次遍历子树进行分类。
         if (cached != null) {
             hits++
-        } else {
-            misses++
+            return cached
         }
-        return cached
+        if (!isCacheable(node)) {
+            bypasses++
+            return null
+        }
+        misses++
+        return null
     }
 
-    /**
-     * 写入单节点缓存。
-     */
     fun putNode(node: LatexNode, context: RenderContext, layout: NodeLayout) {
-        val key = CacheKey(node, normalizeContext(context))
-        nodeCache[key] = layout
+        if (enabled && isCacheable(node)) nodeCache[CacheKey(node, context)] = layout
     }
 
-    /**
-     * 查询节点组缓存。
-     *
-     * @return 缓存的 NodeLayout，未命中时返回 null
-     */
-    fun getGroup(nodes: List<LatexNode>, context: RenderContext): NodeLayout? {
-        val key = GroupCacheKey(nodes, normalizeContext(context))
-        return groupCache[key]
+    private fun isCacheable(node: LatexNode): Boolean {
+        val identity = NodeIdentity(node)
+        cacheability[identity]?.let { return it }
+        val dependsOnDocument = when (node) {
+            is LatexNode.Ref, is LatexNode.EqRef, is LatexNode.Subequations -> true
+            is LatexNode.Environment -> EquationNumbering.isNumberedEnvName(node.name)
+            is LatexNode.Aligned -> node.envName?.let(EquationNumbering::isNumberedEnvName) == true
+            is LatexNode.Multline -> node.envName?.let(EquationNumbering::isNumberedEnvName) == true
+            is LatexNode.Eqnarray -> node.envName?.let(EquationNumbering::isNumberedEnvName) == true
+            else -> false
+        }
+        // 不短路子节点遍历，在同一轮递归中完成后代分类，后续查询可直接复用。
+        var cacheable = !dependsOnDocument
+        for (child in node.children()) {
+            if (!isCacheable(child)) cacheable = false
+        }
+        cacheability[identity] = cacheable
+        return cacheable
     }
 
-    /**
-     * 写入节点组缓存。
-     */
-    fun putGroup(nodes: List<LatexNode>, context: RenderContext, layout: NodeLayout) {
-        val key = GroupCacheKey(nodes, normalizeContext(context))
-        groupCache[key] = layout
-    }
-
-    /**
-     * 清空所有缓存。
-     * 在新的渲染周期开始时调用（字体、配置可能已变化）。
-     */
     fun clear() {
         nodeCache.clear()
-        groupCache.clear()
+        cacheability.clear()
         hits = 0
         misses = 0
+        bypasses = 0
     }
 
-    /**
-     * 当前缓存大小。
-     */
-    val size: Int get() = nodeCache.size + groupCache.size
+    val size: Int get() = nodeCache.size
 
     companion object {
-        /** 默认最大缓存条目数 */
         const val DEFAULT_MAX_SIZE = 2048
     }
 }
 
-/**
- * 跨平台 LRU 缓存实现。
- *
- * 使用 [LinkedHashMap] 的插入顺序（Kotlin 跨平台默认行为）+
- * 手动 access-order 提升（get 时 remove+put）实现 LRU 语义。
- * 容量超限时淘汰最早插入/最久未访问的条目。
- */
+private class NodeIdentity(private val node: LatexNode) {
+    private val hash = layoutIdentityHashCode(node)
+    override fun hashCode(): Int = hash
+    override fun equals(other: Any?): Boolean = other is NodeIdentity && node === other.node
+}
+
+/** 仅保存纯布局所需的输入快照，不持有文档编号状态。 */
+private class CacheKey(private val node: LatexNode, context: RenderContext) {
+    private val fontSize = context.fontSize
+    private val baseFontSize = context.baseFontSize
+    private val color = context.color
+    private val errorColor = context.errorColor
+    private val mathStyle = context.mathStyle
+    private val isCramped = context.isCramped
+    private val fontWeight = context.fontWeight
+    private val fontStyle = context.fontStyle
+    private val fontFamily = context.fontFamily
+    private val fontVariant = context.fontVariant
+    private val fontFamilies = context.fontFamilies
+    private val isVariantFontFamily = context.isVariantFontFamily
+    private val layoutHints = context.layoutHints
+    private val mathFontProvider = context.mathFontProvider
+    private val textDirection = context.textDirection
+
+    private val hash: Int = run {
+        var result = layoutIdentityHashCode(node)
+        result = 31 * result + fontSize.hashCode()
+        result = 31 * result + baseFontSize.hashCode()
+        result = 31 * result + color.hashCode()
+        result = 31 * result + errorColor.hashCode()
+        result = 31 * result + mathStyle.hashCode()
+        result = 31 * result + isCramped.hashCode()
+        result = 31 * result + (fontWeight?.hashCode() ?: 0)
+        result = 31 * result + (fontStyle?.hashCode() ?: 0)
+        result = 31 * result + identityHash(fontFamily)
+        result = 31 * result + fontVariant.hashCode()
+        result = 31 * result + identityHash(fontFamilies)
+        result = 31 * result + isVariantFontFamily.hashCode()
+        result = 31 * result + layoutHints.hashCode()
+        result = 31 * result + identityHash(mathFontProvider)
+        result = 31 * result + textDirection.hashCode()
+        result
+    }
+
+    override fun hashCode(): Int = hash
+
+    override fun equals(other: Any?): Boolean = other is CacheKey &&
+        node === other.node && fontSize == other.fontSize && baseFontSize == other.baseFontSize &&
+        color == other.color && errorColor == other.errorColor && mathStyle == other.mathStyle &&
+        isCramped == other.isCramped && fontWeight == other.fontWeight && fontStyle == other.fontStyle &&
+        fontFamily === other.fontFamily && fontVariant == other.fontVariant &&
+        fontFamilies === other.fontFamilies && isVariantFontFamily == other.isVariantFontFamily &&
+        layoutHints == other.layoutHints && mathFontProvider === other.mathFontProvider &&
+        textDirection == other.textDirection
+}
+
+private fun identityHash(value: Any?): Int = if (value == null) 0 else layoutIdentityHashCode(value)
+
+/** 命中时只查询一次 HashMap，再原地移动双向链表节点，避免删除、重插及额外分配。 */
 private class LruCache<K, V>(private val maxSize: Int) {
-    private val map = LinkedHashMap<K, V>()
+    init {
+        require(maxSize >= 0) { "Cache capacity must not be negative" }
+    }
+
+    private class Entry<K, V>(val key: K, var value: V) {
+        var previous: Entry<K, V>? = null
+        var next: Entry<K, V>? = null
+    }
+
+    private val map = HashMap<K, Entry<K, V>>()
+    private var oldest: Entry<K, V>? = null
+    private var newest: Entry<K, V>? = null
 
     val size: Int get() = map.size
 
     operator fun get(key: K): V? {
-        val value = map[key] ?: return null
-        // 提升访问顺序：移除后重新插入到末尾
-        map.remove(key)
-        map[key] = value
-        return value
+        val entry = map[key] ?: return null
+        moveToNewest(entry)
+        return entry.value
     }
 
     operator fun set(key: K, value: V) {
-        map.remove(key) // 确保新插入到末尾
-        map[key] = value
-        // 超容量时淘汰最老条目（迭代器第一个元素）
-        if (map.size > maxSize) {
-            val eldest = map.keys.iterator().next()
-            map.remove(eldest)
+        if (maxSize == 0) return
+        val existing = map[key]
+        if (existing != null) {
+            existing.value = value
+            moveToNewest(existing)
+            return
         }
+        val entry = Entry(key, value)
+        map[key] = entry
+        append(entry)
+        if (map.size > maxSize) {
+            val evicted = oldest ?: return
+            detach(evicted)
+            map.remove(evicted.key)
+        }
+    }
+
+    private fun moveToNewest(entry: Entry<K, V>) {
+        if (entry === newest) return
+        detach(entry)
+        append(entry)
+    }
+
+    private fun detach(entry: Entry<K, V>) {
+        val previous = entry.previous
+        val next = entry.next
+        if (previous == null) oldest = next else previous.next = next
+        if (next == null) newest = previous else next.previous = previous
+        entry.previous = null
+        entry.next = null
+    }
+
+    private fun append(entry: Entry<K, V>) {
+        entry.previous = newest
+        newest?.next = entry
+        if (oldest == null) oldest = entry
+        newest = entry
     }
 
     fun clear() {
         map.clear()
+        oldest = null
+        newest = null
     }
 }

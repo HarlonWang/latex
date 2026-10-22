@@ -29,7 +29,9 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
 dependencies {
     implementation(project(":latex-parser"))
     implementation(project(":latex-renderer"))
+    runtimeOnly(project(":latex-fonts-katex"))
     implementation(libs.kotlinx.benchmark.runtime)
+    implementation(libs.kotlinx.coroutines.core)
 
     // Compose Desktop 依赖（用于 TextMeasurer, Density 等）
     implementation(compose.desktop.currentOs)
@@ -52,4 +54,39 @@ benchmark {
     targets {
         register("main")
     }
+}
+
+// kotlinx-benchmark 的 runner 不支持透传 JMH profiler；直接复用其生成物运行标准 JMH。
+tasks.register<JavaExec>("layoutCacheJmh") {
+    group = "benchmark"
+    description = "Run the layout-cache suite with JSON output and optional JMH GC allocation profiling"
+    dependsOn("mainBenchmarkCompile")
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    })
+    mainClass.set("org.openjdk.jmh.Main")
+    classpath(
+        layout.buildDirectory.dir("benchmarks/main/classes"),
+        layout.buildDirectory.dir("benchmarks/main/resources"),
+        sourceSets.main.get().runtimeClasspath
+    )
+    val report = providers.gradleProperty("layoutCacheReport")
+        .map { rootProject.file(it) }
+        .orElse(layout.buildDirectory.file("reports/layout-cache/jmh.json").map { it.asFile })
+    args(
+        providers.gradleProperty("layoutCacheInclude").orElse(
+            "com.hrm.latex.benchmark.(CacheBenchmark|LayoutCacheIncrementalBenchmark|LayoutCacheOperationBenchmark).*"
+        ).get(),
+        "-wi", providers.gradleProperty("layoutCacheWarmups").orElse("2").get(),
+        "-i", providers.gradleProperty("layoutCacheIterations").orElse("3").get(),
+        "-w", providers.gradleProperty("layoutCacheIterationMs").orElse("200").get() + "ms",
+        "-r", providers.gradleProperty("layoutCacheIterationMs").orElse("200").get() + "ms",
+        "-f", providers.gradleProperty("layoutCacheForks").orElse("1").get(),
+        "-t", "1", "-tu", "ms", "-rf", "json", "-rff", report.get().absolutePath,
+        "-foe", "true"
+    )
+    if (providers.gradleProperty("layoutCacheGc").orElse("false").get().toBoolean()) {
+        args("-prof", "gc")
+    }
+    doFirst { report.get().parentFile.mkdirs() }
 }

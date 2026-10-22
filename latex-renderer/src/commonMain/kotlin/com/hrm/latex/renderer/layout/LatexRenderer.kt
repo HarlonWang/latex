@@ -84,6 +84,8 @@ internal object LatexRenderer {
         layoutMap: LayoutMap? = null,
         cache: LayoutCache? = null
     ): LatexRenderResult {
+        cache?.beginMeasure(textMeasurer, density)
+
         // 清除每次测量周期的缓存（字体/字号可能已变化）
         LayoutUtils.clearCache()
 
