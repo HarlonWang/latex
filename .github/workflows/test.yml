@@ -37,6 +37,8 @@ jobs:
 
       - name: 缓存 Gradle 构建状态
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: wrapper
 
       - name: 授予 Gradle 执行权限
         run: chmod +x ./gradlew
@@ -82,6 +84,7 @@ jobs:
       - name: 缓存 Gradle 与浏览器工具链
         uses: gradle/actions/setup-gradle@v4
         with:
+          gradle-version: wrapper
           gradle-home-cache-includes: |
             caches
             notifications
@@ -147,6 +150,8 @@ jobs:
 
       - name: 缓存 Gradle 构建状态
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: wrapper
 
       - name: 授予 Gradle 执行权限
         run: chmod +x ./gradlew
