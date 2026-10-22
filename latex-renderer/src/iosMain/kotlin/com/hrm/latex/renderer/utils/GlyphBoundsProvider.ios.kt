@@ -20,17 +20,28 @@
  * SOFTWARE.
  */
 
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package com.hrm.latex.renderer.utils
 
 import org.jetbrains.skia.Data
 import org.jetbrains.skia.Font
 import org.jetbrains.skia.FontMgr
+import org.jetbrains.skia.Typeface
+import org.jetbrains.skia.impl.use
+import platform.Foundation.NSLock
+
+private val glyphTypefaceLock = NSLock()
+private val glyphTypefaceCache = FontResourceCache<Typeface>(
+    create = { bytes -> Data.makeFromBytes(bytes).use { FontMgr.default.makeFromData(it) } },
+    dispose = { it.close() }
+)
 
 /**
  * iOS 平台：使用 Skia (org.jetbrains.skia via Skiko) API 获取精确墨水边界。
  *
- * Compose for iOS 底层使用 Skia 渲染引擎，Skia API 可直接访问。
- * 实现与 JVM Desktop 平台相同。
+ * 按字体字节数组身份复用有界 Typeface 缓存，临时 Data 和 Font 在使用后立即释放。
+ * 缓存访问与整段测量共用一把锁，避免其它线程淘汰仍在使用的原生字体。
  */
 actual fun measureGlyphBounds(
     text: String,
@@ -41,33 +52,38 @@ actual fun measureGlyphBounds(
     if (text.isEmpty()) return null
 
     return try {
-        val data = Data.makeFromBytes(fontBytes)
-        val typeface = FontMgr.default.makeFromData(data) ?: return null
-        val font = Font(typeface, fontSizePx)
+        glyphTypefaceLock.lock()
+        try {
+            glyphTypefaceCache.withValue(fontBytes) { typeface ->
+                Font(typeface, fontSizePx).use { font ->
+                    val glyphIds = font.getStringGlyphs(text)
+                    if (glyphIds.isEmpty()) return@use null
 
-        val glyphIds = font.getStringGlyphs(text)
-        if (glyphIds.isEmpty()) return null
+                    val glyphBoundsArray = font.getBounds(glyphIds)
+                    if (glyphBoundsArray.isEmpty()) return@use null
 
-        val glyphBoundsArray = font.getBounds(glyphIds)
-        if (glyphBoundsArray.isEmpty()) return null
+                    var minTop = Float.MAX_VALUE
+                    var maxBottom = Float.MIN_VALUE
 
-        var minTop = Float.MAX_VALUE
-        var maxBottom = Float.MIN_VALUE
+                    for (rect in glyphBoundsArray) {
+                        if (rect.width > 0 || rect.height > 0) {
+                            minTop = minOf(minTop, rect.top)
+                            maxBottom = maxOf(maxBottom, rect.bottom)
+                        }
+                    }
 
-        for (rect in glyphBoundsArray) {
-            if (rect.width > 0 || rect.height > 0) {
-                minTop = minOf(minTop, rect.top)
-                maxBottom = maxOf(maxBottom, rect.bottom)
+                    if (minTop == Float.MAX_VALUE) return@use null
+
+                    val ascentPx = (-minTop).coerceAtLeast(0f)
+                    val descentPx = maxBottom.coerceAtLeast(0f)
+                    val inkWidth = font.measureTextWidth(text)
+
+                    GlyphBounds(ascentPx, descentPx, inkWidth)
+                }
             }
+        } finally {
+            glyphTypefaceLock.unlock()
         }
-
-        if (minTop == Float.MAX_VALUE) return null
-
-        val ascentPx = (-minTop).coerceAtLeast(0f)
-        val descentPx = maxBottom.coerceAtLeast(0f)
-        val inkWidth = font.measureTextWidth(text)
-
-        GlyphBounds(ascentPx, descentPx, inkWidth)
     } catch (e: Exception) {
         null
     }

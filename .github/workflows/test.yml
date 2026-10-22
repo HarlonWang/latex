@@ -98,7 +98,7 @@ jobs:
           key: ${{ runner.os }}-yarn-${{ matrix.compiler }}-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', 'gradle.properties') }}
           restore-keys: ${{ runner.os }}-yarn-${{ matrix.compiler }}-
 
-      - name: 编译平台测试并验证对象身份
+      - name: 编译并运行平台回归测试
         env:
           YARN_CACHE_FOLDER: ${{ runner.temp }}/latex-yarn-cache
         run: |
@@ -107,18 +107,22 @@ jobs:
           export CHROME_BIN
           ./gradlew \
             :latex-parser:compileTestKotlin${{ matrix.compiler }} \
-            :latex-renderer:${{ matrix.target }} --tests '*LayoutIdentityTest*' \
+            :latex-renderer:${{ matrix.target }} \
+            --tests '*LayoutIdentityTest*' --tests '*FontResourceCacheTest*' \
             --console=plain
           # 筛选为空也可能成功，额外确认实际执行了测试。
           python3 - <<'PY'
           from pathlib import Path
           import xml.etree.ElementTree as ET
           target = "${{ matrix.target }}"
-          reports = Path("latex-renderer/build/test-results", target).glob("TEST-*.xml")
-          count = sum(int(ET.parse(report).getroot().get("tests", 0)) for report in reports)
-          if count < 2:
-              raise SystemExit(f"{target}: 预期至少 2 项身份测试，实际 {count}")
-          print(f"{target}: 已执行 {count} 项测试")
+          reports = [ET.parse(report).getroot() for report in
+                     Path("latex-renderer/build/test-results", target).glob("TEST-*.xml")]
+          for test_class, minimum in (("LayoutIdentityTest", 2), ("FontResourceCacheTest", 3)):
+              count = sum(int(report.get("tests", 0)) for report in reports
+                          if test_class in report.get("name", ""))
+              if count < minimum:
+                  raise SystemExit(f"{target}: {test_class} 预期至少 {minimum} 项，实际 {count}")
+              print(f"{target}: {test_class} 已执行 {count} 项测试")
           PY
 
       - name: 保存浏览器测试报告
