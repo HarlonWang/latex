@@ -193,8 +193,11 @@ class LatexMeasurerState internal constructor(
             // 测量结果直接用于绘制，占位内容里不再重新解析和测量同一个公式
             measureForRender(latex, config, isDarkTheme, config.highlight.ranges)?.let { measured ->
                 dimensionsCache.putBounded(MeasureCacheKey(latex, config, isDarkTheme), measured.dimensions)
+                // 主题不一致时只可能是另一种主题，记住其结果，重新组合时不再重测
+                var otherTheme: MeasuredLatex? = null
                 measured.toInlineTextContent(density, isDarkTheme) { isDark ->
-                    measureForRender(latex, config, isDark, config.highlight.ranges)
+                    otherTheme ?: measureForRender(latex, config, isDark, config.highlight.ranges)
+                        .also { otherTheme = it }
                 }
             }
         }
