@@ -19,17 +19,17 @@ import java.util.concurrent.TimeUnit
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 open class CacheBenchmark {
-    @Param("medium", "complex", "large", "deep")
+    @Param("medium", "large")
     lateinit var input: String
 
-    private lateinit var fixture: LayoutCacheBenchmarkFixture
+    private lateinit var fixture: BenchmarkFixture
     private lateinit var ast: List<LatexNode>
     private lateinit var warmCache: LayoutCache
 
     @Setup
     fun setup() {
-        fixture = LayoutCacheBenchmarkFixture()
-        ast = LatexParser().parse(layoutCacheInput(input)).children
+        fixture = BenchmarkFixture()
+        ast = LatexParser().parse(BenchmarkInputs.formula(input)).children
         // 字体加载、glyph 初始化和预填全部排除在计时外。
         fixture.measure(ast)
         warmCache = LayoutCache()

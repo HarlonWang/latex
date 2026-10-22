@@ -1,8 +1,12 @@
 package com.hrm.latex.benchmark
 
+import com.hrm.latex.parser.LatexParser
+import com.hrm.latex.parser.ParseDiagnostic
+import com.hrm.latex.parser.model.LatexNode
+
 /**
- * Benchmark 测试数据集：不同复杂度级别的 LaTeX 公式常量。
- * 所有公式均为合法 LaTeX，覆盖从简单到大规模的梯度场景。
+ * 解析和渲染共用的命名语料；malformed 专门覆盖未知命令和缺少闭合符号的恢复路径。
+ * 原有常量继续供流式与渲染基准使用，避免不同测试各自拼接同名但内容不同的公式。
  */
 object BenchmarkInputs {
 
@@ -22,6 +26,45 @@ object BenchmarkInputs {
     val LARGE: String = buildString {
         repeat(20) { append("$MEDIUM + ") }
         append(MEDIUM)
+    }
+
+    val MACRO: String = "\\newcommand{\\benchterm}[1]{\\frac{#1^2+1}{#1+2}}" +
+            List(100) { "\\benchterm{x}" }.joinToString(" + ")
+
+    val DEEP: String = "{".repeat(96) + "x" + "}".repeat(96)
+
+    const val TEXT = "\\text{Energy balance: } E_{\\text{total}} = mc^2 + \\text{温度 } T"
+
+    const val MULTILINE = "\\begin{aligned} x+y &= 1 \\\\ x-y &= \\frac{1}{2} \\\\ z &= \\sqrt{x^2+y^2} \\end{aligned}"
+
+    const val MALFORMED = "a + \\unknownbenchmark{x} + \\frac{x+1}{\\sqrt{y"
+
+    fun formula(name: String): String = when (name) {
+        "simple" -> SIMPLE
+        "medium" -> MEDIUM
+        "complex" -> COMPLEX
+        "matrix" -> MATRIX
+        "large" -> LARGE
+        "macro" -> MACRO
+        "deep" -> DEEP
+        "text" -> TEXT
+        "multiline" -> MULTILINE
+        "malformed" -> MALFORMED
+        else -> error("未知性能测试语料：$name")
+    }
+
+    /** 仅供 Trial setup 使用，防止把静默失败或失去错误恢复覆盖的输入当作有效采样。 */
+    internal fun validatedDocument(name: String, parser: LatexParser = LatexParser()): LatexNode.Document {
+        val result = parser.parseWithDiagnostics(formula(name))
+        check(result.document.children.isNotEmpty()) { "$name 语料未产生 AST" }
+        if (name == "malformed") {
+            check(result.diagnostics.any { it.severity == ParseDiagnostic.Severity.ERROR }) {
+                "malformed 语料必须进入错误恢复路径"
+            }
+        } else {
+            check(result.diagnostics.isEmpty()) { "$name 语料存在意外诊断：${result.diagnostics}" }
+        }
+        return result.document
     }
 
     // ── 增量解析：分块输入序列 ──

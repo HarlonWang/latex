@@ -1,69 +1,43 @@
 package com.hrm.latex.benchmark
 
 import com.hrm.latex.parser.LatexParser
-import kotlinx.benchmark.*
+import org.openjdk.jmh.annotations.Benchmark
+import org.openjdk.jmh.annotations.BenchmarkMode
+import org.openjdk.jmh.annotations.Level
+import org.openjdk.jmh.annotations.Mode
+import org.openjdk.jmh.annotations.OutputTimeUnit
+import org.openjdk.jmh.annotations.Param
+import org.openjdk.jmh.annotations.Scope
+import org.openjdk.jmh.annotations.Setup
+import org.openjdk.jmh.annotations.State
+import org.openjdk.jmh.infra.Blackhole
+import java.util.concurrent.TimeUnit
 
-@State(Scope.Benchmark)
+/** 两个公开解析入口均包含分词和 AST 构建，使用完全相同的输入。 */
+@State(Scope.Thread)
 @BenchmarkMode(Mode.AverageTime)
-@OutputTimeUnit(BenchmarkTimeUnit.MICROSECONDS)
+@OutputTimeUnit(TimeUnit.MILLISECONDS)
 open class ParserBenchmark {
+    @Param("simple", "medium", "complex", "matrix", "large", "macro", "deep", "text", "multiline", "malformed")
+    lateinit var input: String
 
+    private lateinit var source: String
     private lateinit var parser: LatexParser
-    private val macroInput = "\\newcommand{\\square}[1]{#1^2}" + "\\square{x}+".repeat(100) + "0"
-    private val largeMacroInput = "\\newcommand{\\square}[1]{#1^2}" + "\\square{x}+".repeat(1000) + "0"
 
-    @Benchmark
-    fun parseMacros(bh: Blackhole) = bh.consume(parser.parse(macroInput))
-
-    @Benchmark
-    fun parseMacrosLarge(bh: Blackhole) = bh.consume(parser.parse(largeMacroInput))
-
-    @Setup
+    @Setup(Level.Trial)
     fun setup() {
+        source = BenchmarkInputs.formula(input)
         parser = LatexParser()
-    }
-
-    // ── parse() 基准测试 ──
-
-    @Benchmark
-    fun parseSimple(bh: Blackhole) {
-        bh.consume(parser.parse(BenchmarkInputs.SIMPLE))
+        BenchmarkInputs.validatedDocument(input, parser)
     }
 
     @Benchmark
-    fun parseMedium(bh: Blackhole) {
-        bh.consume(parser.parse(BenchmarkInputs.MEDIUM))
+    fun parse(bh: Blackhole) {
+        bh.consume(parser.parse(source))
     }
 
     @Benchmark
-    fun parseComplex(bh: Blackhole) {
-        bh.consume(parser.parse(BenchmarkInputs.COMPLEX))
-    }
-
-    @Benchmark
-    fun parseMatrix(bh: Blackhole) {
-        bh.consume(parser.parse(BenchmarkInputs.MATRIX))
-    }
-
-    @Benchmark
-    fun parseLarge(bh: Blackhole) {
-        bh.consume(parser.parse(BenchmarkInputs.LARGE))
-    }
-
-    // ── parseWithDiagnostics() 基准测试 ──
-
-    @Benchmark
-    fun parseWithDiagnosticsSimple(bh: Blackhole) {
-        bh.consume(parser.parseWithDiagnostics(BenchmarkInputs.SIMPLE))
-    }
-
-    @Benchmark
-    fun parseWithDiagnosticsMedium(bh: Blackhole) {
-        bh.consume(parser.parseWithDiagnostics(BenchmarkInputs.MEDIUM))
-    }
-
-    @Benchmark
-    fun parseWithDiagnosticsComplex(bh: Blackhole) {
-        bh.consume(parser.parseWithDiagnostics(BenchmarkInputs.COMPLEX))
+    fun parseWithDiagnostics(bh: Blackhole) {
+        bh.consume(parser.parseWithDiagnostics(source))
     }
 }

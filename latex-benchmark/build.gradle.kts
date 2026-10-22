@@ -57,35 +57,37 @@ benchmark {
 }
 
 // kotlinx-benchmark 的 runner 不支持透传 JMH profiler；直接复用其生成物运行标准 JMH。
-tasks.register<JavaExec>("layoutCacheJmh") {
+tasks.register<JavaExec>("performanceBenchmark") {
     group = "benchmark"
-    description = "Run the layout-cache suite with JSON output and optional JMH GC allocation profiling"
+    description = "运行全链路 JVM 性能基准并输出 JSON 与 GC 分配指标"
     dependsOn("mainBenchmarkCompile")
     javaLauncher.set(javaToolchains.launcherFor {
         languageVersion.set(JavaLanguageVersion.of(21))
     })
     mainClass.set("org.openjdk.jmh.Main")
+    // 固定堆大小，避免不同机器的默认堆策略干扰分配与 GC 对比。
+    jvmArgs("-Xms256m", "-Xmx1g")
     classpath(
         layout.buildDirectory.dir("benchmarks/main/classes"),
         layout.buildDirectory.dir("benchmarks/main/resources"),
         sourceSets.main.get().runtimeClasspath
     )
-    val report = providers.gradleProperty("layoutCacheReport")
+    val report = providers.gradleProperty("benchmarkReport")
         .map { rootProject.file(it) }
-        .orElse(layout.buildDirectory.file("reports/layout-cache/jmh.json").map { it.asFile })
+        .orElse(layout.buildDirectory.file("reports/performance/jmh.json").map { it.asFile })
     args(
-        providers.gradleProperty("layoutCacheInclude").orElse(
-            "com.hrm.latex.benchmark.(CacheBenchmark|LayoutCacheIncrementalBenchmark|LayoutCacheOperationBenchmark).*"
+        providers.gradleProperty("benchmarkInclude").orElse(
+            "com.hrm.latex.benchmark.*Benchmark.*"
         ).get(),
-        "-wi", providers.gradleProperty("layoutCacheWarmups").orElse("2").get(),
-        "-i", providers.gradleProperty("layoutCacheIterations").orElse("3").get(),
-        "-w", providers.gradleProperty("layoutCacheIterationMs").orElse("200").get() + "ms",
-        "-r", providers.gradleProperty("layoutCacheIterationMs").orElse("200").get() + "ms",
-        "-f", providers.gradleProperty("layoutCacheForks").orElse("1").get(),
+        "-wi", providers.gradleProperty("benchmarkWarmups").orElse("3").get(),
+        "-i", providers.gradleProperty("benchmarkIterations").orElse("5").get(),
+        "-w", providers.gradleProperty("benchmarkIterationMs").orElse("500").get() + "ms",
+        "-r", providers.gradleProperty("benchmarkIterationMs").orElse("500").get() + "ms",
+        "-f", providers.gradleProperty("benchmarkForks").orElse("1").get(),
         "-t", "1", "-tu", "ms", "-rf", "json", "-rff", report.get().absolutePath,
         "-foe", "true"
     )
-    if (providers.gradleProperty("layoutCacheGc").orElse("false").get().toBoolean()) {
+    if (providers.gradleProperty("benchmarkGc").orElse("true").get().toBoolean()) {
         args("-prof", "gc")
     }
     doFirst { report.get().parentFile.mkdirs() }

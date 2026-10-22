@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "description": "手工制定的宽松异常发现预算，用于识别数量级退化，不是 SLA，也不代表 Android 或 Redmi 8A 表现。各组共用上限，覆盖该组公开的输入规模。没有预算或基线的用例必须标记未评判；调整前应审阅原始报告，不按全 GOOD 目标倒推阈值。",
+  "baselineLimits": {
+    "maxTimeRatio": 1.25,
+    "maxAllocationRatio": 1.25
+  },
+  "groups": [
+    {
+      "id": "tokenizer",
+      "label": "分词",
+      "classes": [
+        "TokenizerBenchmark"
+      ],
+      "maxMeanMs": 1,
+      "maxAllocatedBytesPerOp": 1048576
+    },
+    {
+      "id": "parser",
+      "label": "全量解析与诊断",
+      "classes": [
+        "ParserBenchmark"
+      ],
+      "maxMeanMs": 5,
+      "maxAllocatedBytesPerOp": 4194304
+    },
+    {
+      "id": "visitor",
+      "label": "MathML、可访问性与 AST 输出",
+      "classes": [
+        "VisitorBenchmark"
+      ],
+      "maxMeanMs": 2,
+      "maxAllocatedBytesPerOp": 4194304
+    },
+    {
+      "id": "incremental-parser",
+      "label": "单次增量编辑",
+      "classes": [
+        "IncrementalParserBenchmark"
+      ],
+      "maxMeanMs": 5
+    },
+    {
+      "id": "streaming-parser",
+      "label": "完整流式解析",
+      "classes": [
+        "StreamingParserBenchmark"
+      ],
+      "maxMeanMs": 100,
+      "maxAllocatedBytesPerOp": 134217728
+    },
+    {
+      "id": "measurement",
+      "label": "节点、整式、换行与文字测量",
+      "classes": [
+        "RendererMeasureBenchmark"
+      ],
+      "maxMeanMs": 50,
+      "maxAllocatedBytesPerOp": 8388608
+    },
+    {
+      "id": "pipeline",
+      "label": "解析到布局的完整管线",
+      "classes": [
+        "PipelineBenchmark"
+      ],
+      "maxMeanMs": 100,
+      "maxAllocatedBytesPerOp": 16777216
+    },
+    {
+      "id": "incremental-measure",
+      "label": "流式与逐字输入的解析布局批次",
+      "classes": [
+        "IncrementalMeasureBenchmark"
+      ],
+      "maxMeanMs": 250,
+      "maxAllocatedBytesPerOp": 67108864
+    },
+    {
+      "id": "drawing",
+      "label": "离屏绘制",
+      "classes": [
+        "RendererDrawBenchmark"
+      ],
+      "maxMeanMs": 10,
+      "maxAllocatedBytesPerOp": 2097152
+    },
+    {
+      "id": "export",
+      "label": "PNG 与 SVG 导出",
+      "classes": [
+        "ExportBenchmark"
+      ],
+      "maxMeanMs": 200,
+      "maxAllocatedBytesPerOp": 33554432
+    },
+    {
+      "id": "editor",
+      "label": "编辑器命中检测与光标查询",
+      "classes": [
+        "EditorBenchmark"
+      ],
+      "maxMeanMs": 0.25,
+      "maxAllocatedBytesPerOp": 262144
+    },
+    {
+      "id": "fonts",
+      "label": "字体资源加载",
+      "classes": [
+        "FontLoadingBenchmark"
+      ],
+      "maxMeanMs": 200,
+      "maxAllocatedBytesPerOp": 16777216
+    },
+    {
+      "id": "layout-cache",
+      "label": "布局缓存对照",
+      "classes": [
+        "CacheBenchmark"
+      ],
+      "maxMeanMs": 50,
+      "maxAllocatedBytesPerOp": 8388608
+    }
+  ]
+}

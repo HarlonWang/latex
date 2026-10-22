@@ -2,204 +2,167 @@ package com.hrm.latex.benchmark
 
 import com.hrm.latex.parser.IncrementalLatexParser
 import com.hrm.latex.parser.LatexParser
-import kotlinx.benchmark.*
+import com.hrm.latex.parser.model.LatexNode
+import com.hrm.latex.parser.util.LatexPrinter
+import com.hrm.latex.parser.visitor.MathMLVisitor
+import org.openjdk.jmh.annotations.Benchmark
+import org.openjdk.jmh.annotations.BenchmarkMode
+import org.openjdk.jmh.annotations.Level
+import org.openjdk.jmh.annotations.Mode
+import org.openjdk.jmh.annotations.OutputTimeUnit
+import org.openjdk.jmh.annotations.Param
+import org.openjdk.jmh.annotations.Scope
+import org.openjdk.jmh.annotations.Setup
+import org.openjdk.jmh.annotations.State
+import org.openjdk.jmh.infra.Blackhole
+import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 
 /**
- * 增量解析 vs 全量解析 性能对比 Benchmark。
- *
- * 设计原则：每组对比包含一个增量用例和一个等效全量用例，
- * 确保对比公平（相同输入、相同输出）。
+ * 单次编辑对照：每次 invocation 的初始解析放在 Setup，计时只包含编辑后一次解析。
+ * 三类编辑均验证最终输入及语义输出一致；宏输入有上下文依赖，允许产品正确地回退全量解析。
  */
-@State(Scope.Benchmark)
+@State(Scope.Thread)
 @BenchmarkMode(Mode.AverageTime)
-@OutputTimeUnit(BenchmarkTimeUnit.MICROSECONDS)
+@OutputTimeUnit(TimeUnit.MILLISECONDS)
 open class IncrementalParserBenchmark {
+    @Param("medium", "large", "macro")
+    lateinit var input: String
 
+    @Param("append", "replace", "delete")
+    lateinit var edit: String
+
+    private lateinit var source: String
+    private lateinit var edited: String
     private lateinit var parser: LatexParser
+    private lateinit var incremental: IncrementalLatexParser
+    private val suffix = " + \\alpha^2"
 
-    // ── 预拼接的完整字符串 ──
-    private lateinit var mediumAppended: String
-    private lateinit var largeAppended: String
-    private lateinit var complexAppended: String
-    private lateinit var mediumModified: String
-    private lateinit var largeModified: String
-
-    private val appendSuffix = " + \\alpha^2"
-    private val modifySuffix = " + \\gamma"
-
-    @Setup
+    @Setup(Level.Trial)
     fun setup() {
+        source = BenchmarkInputs.formula(input)
         parser = LatexParser()
-
-        mediumAppended = BenchmarkInputs.MEDIUM + appendSuffix
-        largeAppended = BenchmarkInputs.LARGE + appendSuffix
-        complexAppended = BenchmarkInputs.COMPLEX + appendSuffix
-        mediumModified = BenchmarkInputs.MEDIUM.dropLast(1) + modifySuffix + "}"
-        largeModified = BenchmarkInputs.LARGE.dropLast(1) + modifySuffix + "}"
-    }
-
-    /** 创建已完成首次解析的增量解析器 */
-    private fun prebuilt(input: String): IncrementalLatexParser {
-        return IncrementalLatexParser().also {
-            it.setInput(input)
-            it.getCurrentDocument()
+        BenchmarkInputs.validatedDocument(input, parser)
+        edited = when (edit) {
+            "append" -> source + suffix
+            "replace" -> {
+                val index = middleAtomIndex()
+                source.replaceRange(index, index + 1, "z")
+            }
+            "delete" -> {
+                if (input == "macro") {
+                    // 删除完整宏调用及其右侧加号，避免人为制造空实参或孤立上标。
+                    val term = "\\benchterm{x} + "
+                    val index = source.indices.filter { source.startsWith(term, it) }
+                        .minBy { abs(it - source.length / 2) }
+                    source.removeRange(index, index + term.length)
+                } else {
+                    val index = middleAtomIndex()
+                    val length = if (source.startsWith("^2", index + 1)) 3 else 1
+                    source.removeRange(index, index + length)
+                }
+            }
+            else -> error("未知编辑类型：$edit")
         }
+        val expected = parser.parseWithDiagnostics(edited)
+        check(expected.diagnostics.isEmpty()) { "$input/$edit 编辑后存在意外诊断：${expected.diagnostics}" }
+        val probe = prebuilt()
+        applyEdit(probe)
+        check(probe.getCurrentInput() == edited)
+        checkEquivalent(expected.document, probe.getCurrentDocument(), "$input/$edit")
     }
 
-    // ════════════════════════════════════════════════════════════════════
-    // 组 1: 追加场景 — 在已解析公式末尾追加少量内容
-    //   增量：复用旧 AST 前缀，只重解析尾部
-    //   全量：从头解析完整字符串
-    // ════════════════════════════════════════════════════════════════════
-
-    @Benchmark
-    fun append_medium_incremental(bh: Blackhole) {
-        val inc = prebuilt(BenchmarkInputs.MEDIUM)
-        inc.append(appendSuffix)
-        bh.consume(inc.getCurrentDocument())
+    /** 每次恢复同一旧输入，防止重复 invocation 退化为无修改查询或累计追加。 */
+    @Setup(Level.Invocation)
+    fun restoreInitialDocument() {
+        incremental = prebuilt()
     }
 
-    @Benchmark
-    fun append_medium_fullParse(bh: Blackhole) {
-        bh.consume(parser.parse(mediumAppended))
+    private fun middleAtomIndex(): Int {
+        val atom = if (input == "macro") 'x' else 'b'
+        return source.indices.filter { source[it] == atom }.minBy { abs(it - source.length / 2) }
     }
 
-    @Benchmark
-    fun append_large_incremental(bh: Blackhole) {
-        val inc = prebuilt(BenchmarkInputs.LARGE)
-        inc.append(appendSuffix)
-        bh.consume(inc.getCurrentDocument())
+    private fun prebuilt(): IncrementalLatexParser = IncrementalLatexParser().also {
+        it.setInput(source)
+        it.getCurrentDocument()
     }
 
-    @Benchmark
-    fun append_large_fullParse(bh: Blackhole) {
-        bh.consume(parser.parse(largeAppended))
+    private fun applyEdit(target: IncrementalLatexParser) {
+        if (edit == "append") target.append(suffix) else target.setInput(edited)
     }
 
     @Benchmark
-    fun append_complex_incremental(bh: Blackhole) {
-        val inc = prebuilt(BenchmarkInputs.COMPLEX)
-        inc.append(appendSuffix)
-        bh.consume(inc.getCurrentDocument())
+    fun incremental(bh: Blackhole) {
+        applyEdit(incremental)
+        bh.consume(incremental.getCurrentDocument())
     }
 
     @Benchmark
-    fun append_complex_fullParse(bh: Blackhole) {
-        bh.consume(parser.parse(complexAppended))
+    fun fullParse(bh: Blackhole) {
+        bh.consume(parser.parse(edited))
     }
+}
 
-    // ════════════════════════════════════════════════════════════════════
-    // 组 2: setInput 替换场景 — 在已解析基础上替换为修改版
-    //   增量：diff + 增量分词 + 条件增量AST
-    //   全量：从头解析修改后的字符串
-    // ════════════════════════════════════════════════════════════════════
+/**
+ * 每个 op 是从空输入开始、处理全部分块的一整轮流式解析，包含初始化和输入累积。
+ * 两条路径对同一前缀序列逐块获取 AST，最终输出一致；不完整前缀的容错策略允许不同。
+ */
+@State(Scope.Thread)
+@BenchmarkMode(Mode.AverageTime)
+@OutputTimeUnit(TimeUnit.MILLISECONDS)
+open class StreamingParserBenchmark {
+    @Param("medium", "large")
+    lateinit var input: String
 
-    @Benchmark
-    fun setInput_medium_incremental(bh: Blackhole) {
-        val inc = prebuilt(BenchmarkInputs.MEDIUM)
-        inc.setInput(mediumModified)
-        bh.consume(inc.getCurrentDocument())
-    }
+    @Param("1", "16")
+    @JvmField
+    final var chunkSize: Int = 0
 
-    @Benchmark
-    fun setInput_medium_fullParse(bh: Blackhole) {
-        bh.consume(parser.parse(mediumModified))
-    }
+    private lateinit var source: String
+    private lateinit var chunks: List<String>
 
-    @Benchmark
-    fun setInput_large_incremental(bh: Blackhole) {
-        val inc = prebuilt(BenchmarkInputs.LARGE)
-        inc.setInput(largeModified)
-        bh.consume(inc.getCurrentDocument())
-    }
-
-    @Benchmark
-    fun setInput_large_fullParse(bh: Blackhole) {
-        bh.consume(parser.parse(largeModified))
-    }
-
-    // ════════════════════════════════════════════════════════════════════
-    // 组 3: 逐字输入场景 — 逐字符从头输入完整公式
-    //   增量：逐字 append（累计 N 次增量解析）
-    //   全量：每输入一个字符都全量重解析（累计 N 次全量解析）
-    // ════════════════════════════════════════════════════════════════════
-
-    @Benchmark
-    fun charByChar_medium_incremental(bh: Blackhole) {
-        val inc = IncrementalLatexParser()
-        for (char in BenchmarkInputs.MEDIUM) {
-            inc.append(char.toString())
+    @Setup(Level.Trial)
+    fun setup() {
+        source = BenchmarkInputs.formula(input)
+        val expected = BenchmarkInputs.validatedDocument(input)
+        chunks = source.chunked(chunkSize)
+        check(chunks.joinToString("") == source)
+        val probe = IncrementalLatexParser()
+        val full = LatexParser()
+        val accumulated = StringBuilder(source.length)
+        for (chunk in chunks) {
+            probe.append(chunk)
+            probe.getCurrentDocument()
+            accumulated.append(chunk)
+            full.parse(accumulated.toString())
         }
-        bh.consume(inc.getCurrentDocument())
+        check(probe.getCurrentInput() == source)
+        checkEquivalent(expected, probe.getCurrentDocument(), "$input/chunkSize=$chunkSize")
     }
 
     @Benchmark
-    fun charByChar_medium_fullParse(bh: Blackhole) {
-        val sb = StringBuilder(BenchmarkInputs.MEDIUM.length)
-        for (char in BenchmarkInputs.MEDIUM) {
-            sb.append(char)
-            bh.consume(parser.parse(sb.toString()))
+    fun incremental(bh: Blackhole) {
+        val parser = IncrementalLatexParser()
+        for (chunk in chunks) {
+            parser.append(chunk)
+            bh.consume(parser.getCurrentDocument())
         }
     }
 
     @Benchmark
-    fun charByChar_large_incremental(bh: Blackhole) {
-        val inc = IncrementalLatexParser()
-        for (char in BenchmarkInputs.LARGE) {
-            inc.append(char.toString())
-        }
-        bh.consume(inc.getCurrentDocument())
-    }
-
-    @Benchmark
-    fun charByChar_large_fullParse(bh: Blackhole) {
-        val sb = StringBuilder(BenchmarkInputs.LARGE.length)
-        for (char in BenchmarkInputs.LARGE) {
-            sb.append(char)
-            bh.consume(parser.parse(sb.toString()))
+    fun fullParse(bh: Blackhole) {
+        val parser = LatexParser()
+        val accumulated = StringBuilder(source.length)
+        for (chunk in chunks) {
+            accumulated.append(chunk)
+            bh.consume(parser.parse(accumulated.toString()))
         }
     }
+}
 
-    // ════════════════════════════════════════════════════════════════════
-    // 组 4: 分块流式输入场景
-    //   增量：逐块 append
-    //   全量：每块拼接后全量重解析
-    // ════════════════════════════════════════════════════════════════════
-
-    @Benchmark
-    fun chunkByChunk_incremental(bh: Blackhole) {
-        val inc = IncrementalLatexParser()
-        for (chunk in BenchmarkInputs.INCREMENTAL_CHUNKS) {
-            inc.append(chunk)
-        }
-        bh.consume(inc.getCurrentDocument())
-    }
-
-    @Benchmark
-    fun chunkByChunk_fullParse(bh: Blackhole) {
-        val sb = StringBuilder()
-        for (chunk in BenchmarkInputs.INCREMENTAL_CHUNKS) {
-            sb.append(chunk)
-            bh.consume(parser.parse(sb.toString()))
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════
-    // 组 5: 纯基线 — 单次全量解析（参考值）
-    // ════════════════════════════════════════════════════════════════════
-
-    @Benchmark
-    fun baseline_medium(bh: Blackhole) {
-        bh.consume(parser.parse(BenchmarkInputs.MEDIUM))
-    }
-
-    @Benchmark
-    fun baseline_large(bh: Blackhole) {
-        bh.consume(parser.parse(BenchmarkInputs.LARGE))
-    }
-
-    @Benchmark
-    fun baseline_complex(bh: Blackhole) {
-        bh.consume(parser.parse(BenchmarkInputs.COMPLEX))
-    }
+/** 比较可见结构和 MathML，忽略增量节点来源位置的差异；验证不计入采样。 */
+private fun checkEquivalent(expected: LatexNode.Document, actual: LatexNode.Document, label: String) {
+    check(LatexPrinter().print(expected) == LatexPrinter().print(actual)) { "$label 增量 AST 结构与全量解析不一致" }
+    check(MathMLVisitor.convert(expected) == MathMLVisitor.convert(actual)) { "$label 增量语义输出与全量解析不一致" }
 }

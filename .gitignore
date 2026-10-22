@@ -19,3 +19,6 @@ captures
 node_modules/
 /kotlin-js-store
 gradle/gradle-daemon-jvm.properties
+
+# Python 性能报告测试缓存
+__pycache__/

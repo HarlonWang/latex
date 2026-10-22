@@ -39,6 +39,9 @@ jobs:
       - name: 授予 Gradle 执行权限
         run: chmod +x ./gradlew
 
+      - name: 验证性能报告的评判规则
+        run: python3 -m unittest discover -s latex-benchmark -p 'test_report_performance.py'
+
       - name: 运行全仓 JVM 单元测试
         run: ./gradlew jvmTest --console=plain
 
@@ -80,10 +83,10 @@ jobs:
           retention-days: 14
 
   # 性能仅报告 GOOD/BAD，不作合入门禁；采样异常仍保留失败步骤、警告和产物。
-  layout-cache-performance:
-    name: 布局缓存性能报告
+  performance:
+    name: 全链路性能报告
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     continue-on-error: true
 
     steps:
@@ -102,17 +105,19 @@ jobs:
 
       - name: 运行 JMH 并采集 GC 分配指标
         run: |
-          mkdir -p latex-benchmark/build/reports/layout-cache
-          ./gradlew :latex-benchmark:layoutCacheJmh -PlayoutCacheGc=true --console=plain 2>&1 \
-            | tee latex-benchmark/build/reports/layout-cache/benchmark.log
+          mkdir -p latex-benchmark/build/reports/performance
+          ./gradlew :latex-benchmark:performanceBenchmark \
+            -PbenchmarkWarmups=2 -PbenchmarkIterations=3 -PbenchmarkIterationMs=200 \
+            -PbenchmarkGc=true --console=plain 2>&1 \
+            | tee latex-benchmark/build/reports/performance/benchmark.log
 
       - name: 生成 GOOD/BAD 报告并写入运行摘要
         if: always()
         run: |
-          report_json=latex-benchmark/build/reports/layout-cache/jmh.json
-          report_md=latex-benchmark/build/reports/layout-cache/summary.md
+          report_json=latex-benchmark/build/reports/performance/jmh.json
+          report_md=latex-benchmark/build/reports/performance/summary.md
           if [[ -s "$report_json" ]]; then
-            python3 latex-benchmark/report_layout_cache.py "$report_json" --output "$report_md"
+            python3 latex-benchmark/report_performance.py "$report_json" --output "$report_md"
             cat "$report_md" >> "$GITHUB_STEP_SUMMARY"
           else
             echo '::warning::未生成 JMH 结果，请查看性能采样日志。'
@@ -127,6 +132,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: layout-cache-performance
+          name: performance-reports
           path: latex-benchmark/build/reports/**
           retention-days: 30
