@@ -43,15 +43,14 @@ class LatexInlineContentRenderTest {
         val height = ceil(dimensions.heightPx).toInt()
 
         // 行内内容直接绘制预测量结果，输出必须与 Latex() 完整渲染逐像素一致
-        val inlinePixels = renderFrames(width, height, frames = 1) { inline.children("") }
-        // Latex() 在后台解析，多渲染几帧确保已稳定
-        val latexPixels = renderFrames(width, height, frames = 20) { Latex(formula, config = config, isDarkTheme = false) }
+        val inlinePixels = renderOnce(width, height) { inline.children("") }
+        val latexPixels = renderUntilStable(width, height) { Latex(formula, config = config, isDarkTheme = false) }
         assertTrue(inlinePixels.hasInk(), "inline content should draw the formula")
         assertEquals(latexPixels.pixels(), inlinePixels.pixels())
     }
 
     @Test
-    fun measureReusesDimensionsFromInlineContent() {
+    fun measureMatchesInlineContentDimensions() {
         val measurer = measurer()
         val inline = assertNotNull(measurer.inlineContent(formula, config))
         val dimensions = assertNotNull(measurer.measure(formula, config))
@@ -75,18 +74,29 @@ class LatexInlineContentRenderTest {
             current.value = second
             scene.render(16_000_000L).toComposeImageBitmap().toPixelMap()
         }
-        val expectedPixels = renderFrames(width, height, frames = 1) { second.children("") }
+        val expectedPixels = renderOnce(width, height) { second.children("") }
         assertEquals(expectedPixels.pixels(), swappedPixels.pixels())
     }
 
-    private fun renderFrames(width: Int, height: Int, frames: Int, content: @Composable () -> Unit): PixelMap =
+    private fun renderOnce(width: Int, height: Int, content: @Composable () -> Unit): PixelMap =
         ImageComposeScene(width, height, density) { content() }.use { scene ->
-            var image = scene.render(0)
-            for (frame in 1 until frames) {
+            scene.render(0).toComposeImageBitmap().toPixelMap()
+        }
+
+    /** Latex() 在后台解析，逐帧渲染到出现墨迹且连续两帧一致，不靠固定时长等待。 */
+    private fun renderUntilStable(width: Int, height: Int, content: @Composable () -> Unit): PixelMap =
+        ImageComposeScene(width, height, density) { content() }.use { scene ->
+            val deadline = System.currentTimeMillis() + STABLE_TIMEOUT_MS
+            var frame = 0L
+            var previous = scene.render(0).toComposeImageBitmap().toPixelMap()
+            var current = previous
+            do {
+                check(System.currentTimeMillis() < deadline) { "Latex() did not settle within $STABLE_TIMEOUT_MS ms" }
                 Thread.sleep(10)
-                image = scene.render(frame * 16_000_000L)
-            }
-            image.toComposeImageBitmap().toPixelMap()
+                previous = current
+                current = scene.render(++frame * 16_000_000L).toComposeImageBitmap().toPixelMap()
+            } while (!current.hasInk() || current.pixels() != previous.pixels())
+            current
         }
 
     private fun PixelMap.pixels(): List<Int> =
@@ -94,4 +104,8 @@ class LatexInlineContentRenderTest {
 
     private fun PixelMap.hasInk(): Boolean =
         (0 until height).any { y -> (0 until width).any { x -> this[x, y].alpha > 0f } }
+
+    private companion object {
+        const val STABLE_TIMEOUT_MS = 5_000L
+    }
 }
