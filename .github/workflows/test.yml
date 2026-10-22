@@ -69,9 +69,6 @@ jobs:
             compiler: Js
           - target: wasmJsBrowserTest
             compiler: WasmJs
-    env:
-      YARN_CACHE_FOLDER: ${{ runner.temp }}/latex-yarn-cache
-
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -94,11 +91,13 @@ jobs:
       - name: 缓存 NPM 依赖
         uses: actions/cache@v4
         with:
-          path: ${{ env.YARN_CACHE_FOLDER }}
+          path: ${{ runner.temp }}/latex-yarn-cache
           key: ${{ runner.os }}-yarn-${{ matrix.compiler }}-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', 'gradle.properties') }}
           restore-keys: ${{ runner.os }}-yarn-${{ matrix.compiler }}-
 
       - name: 编译平台测试并验证对象身份
+        env:
+          YARN_CACHE_FOLDER: ${{ runner.temp }}/latex-yarn-cache
         run: |
           chmod +x ./gradlew
           CHROME_BIN="$(command -v google-chrome)"
