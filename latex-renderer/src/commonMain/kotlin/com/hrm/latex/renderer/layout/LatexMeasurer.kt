@@ -53,7 +53,6 @@ import com.hrm.latex.renderer.model.applyFontSize
 import com.hrm.latex.renderer.model.applyMathStyle
 import com.hrm.latex.renderer.model.applyStyle
 import com.hrm.latex.renderer.model.withColor
-import com.hrm.latex.renderer.utils.MathSpacing
 import com.hrm.latex.renderer.utils.lineSpacingPx
 import com.hrm.latex.renderer.utils.parseDimension
 import com.hrm.latex.renderer.utils.splitLines
@@ -116,12 +115,15 @@ internal fun measureNode(
     // 查询缓存
     cache?.getNode(node, context)?.let { return it }
 
-    // 递归函数引用
+    // 复合原子的内部按自然宽度测量；外层行宽不能传进分子、根号或矩阵单元。
+    // Subequations 是透明的环境容器，其内容仍可自动换行。
+    fun childContext(s: RenderContext): RenderContext =
+        if (node is LatexNode.Subequations) s else s.withoutAutomaticLineBreaking()
     val measureNodeRef = { n: LatexNode, s: RenderContext ->
-        measureNode(n, s, measurer, density, cache)
+        measureNode(n, childContext(s), measurer, density, cache)
     }
     val measureGroupRef = { nodes: List<LatexNode>, s: RenderContext ->
-        measureGroup(nodes, s, measurer, density, cache = cache)
+        measureGroup(nodes, childContext(s), measurer, density, cache = cache)
     }
 
     // 1. 优先通过注册表分发（覆盖绝大多数节点类型）
@@ -211,7 +213,7 @@ internal fun measureNode(
 
         // MathLap: 绘制内容但宽度为零（或部分为零）
         is LatexNode.MathLap -> {
-            val contentLayout = measureGroup(node.content, context, measurer, density, cache = cache)
+            val contentLayout = measureGroup(node.content, context.withoutAutomaticLineBreaking(), measurer, density, cache = cache)
             when (node.lapType) {
                 // clap: 居中对齐，宽度为零
                 LatexNode.MathLap.LapType.CLAP -> NodeLayout(0f, contentLayout.height, contentLayout.baseline) { x, y ->
@@ -230,7 +232,7 @@ internal fun measureNode(
 
         is LatexNode.Layout -> when (node.layoutType) {
             LatexNode.Layout.LayoutType.RAISE_BOX -> {
-                val content = measureGroup(node.content, context, measurer, density, cache = cache)
+                val content = measureGroup(node.content, context.withoutAutomaticLineBreaking(), measurer, density, cache = cache)
                 val shift = parseDimension(node.shift.orEmpty(), context, density)
                 val rawBaseline = content.baseline + shift
                 val childTop = maxOf(-rawBaseline, 0f)
@@ -294,68 +296,25 @@ internal fun measureGroup(
         return (if (branch is LatexNode.Group) branch.children else listOf(branch)).flatMap(::resolveChoices)
     }
     val nodes = if (inputNodes.any { it is LatexNode.MathChoice }) inputNodes.flatMap(::resolveChoices) else inputNodes
-    // 简单处理多行逻辑：按 NewLine 分割，测量各行，垂直堆叠
+    // 显式换行分成逻辑行，每行仍可继续自动换行。
     val lines = splitLines(nodes)
     if (lines.size > 1) {
-        return measureVerticalLines(lines, context, measurer, density, cache)
-    }
-
-    // automatic line breaking when enabled and maxWidth is set
-    val maxWidth = context.layoutHints.maxLineWidth
-    var precomputedLayouts: List<NodeLayout>? = null
-
-    if (context.layoutHints.lineBreakingEnabled && maxWidth != null && nodes.isNotEmpty()) {
-        val layouts = nodes.map { measureNode(it, context, measurer, density, cache) }
-        val widths = FloatArray(layouts.size) { layouts[it].width }
-
-        var totalWidth = 0f
-        for (w in widths) totalWidth += w
-
-        if (totalWidth > maxWidth) {
-            val lineBreaker = LineBreaker(maxWidth)
-            val brokenLines = lineBreaker.breakIntoLines(nodes, widths)
-
-            if (brokenLines.size > 1) {
-                val lineNodeLists = brokenLines.map { indices ->
-                    indices.map { nodes[it] }
-                }
-                return measureVerticalLines(
-                    lineNodeLists,
-                    context.copy(layoutHints = context.layoutHints.copy(lineBreakingEnabled = false)),
-                    measurer,
-                    density,
-                    cache
-                )
-            }
+        return stackLines(lines, context, density, layoutMap) { line, lineMap ->
+            measureGroup(line, context, measurer, density, lineMap, cache)
         }
-
-        // reuse layouts if no line break occurred
-        precomputedLayouts = layouts
     }
 
-    // 单行 (InlineRow)
-    // 积分延迟测量优化：DISPLAY 模式下，积分节点先跳过，等非积分节点测量完毕后
-    // 根据右侧邻居高度注入 heightHint 一次性测量，避免双重测量。
+    // 节点只测量一次。分行阶段只读取尺寸，不能再次测量或推进公式编号。
     val hasIntegrals = context.mathStyle == MathStyle.DISPLAY &&
             nodes.any { it is LatexNode.BigOperator && it.operator.contains("int") }
-
-    val initialLayouts: List<NodeLayout?>
-    if (hasIntegrals && precomputedLayouts == null) {
-        // 延迟测量路径：积分节点暂置 null
-        initialLayouts = nodes.map { node ->
-            if (node is LatexNode.BigOperator && node.operator.contains("int")) {
-                null // 延迟测量
-            } else {
-                measureNode(node, context, measurer, density, cache)
-            }
+    val initialLayouts = nodes.map { node ->
+        if (hasIntegrals && node is LatexNode.BigOperator && node.operator.contains("int")) {
+            null
+        } else {
+            measureNode(node, context, measurer, density, cache)
         }
-    } else {
-        initialLayouts = precomputedLayouts?.map { it }
-            ?: nodes.map { measureNode(it, context, measurer, density, cache) }
     }
-
-    // 填充延迟的积分节点（使用右侧邻居高度作为 heightHint）
-    val finalMeasuredNodes = if (initialLayouts.any { it == null }) {
+    val layouts = if (hasIntegrals) {
         GroupLayoutPostProcessor.fillDeferredIntegrals(
             nodes, initialLayouts, context, measurer, density, cache
         )
@@ -363,106 +322,96 @@ internal fun measureGroup(
         @Suppress("UNCHECKED_CAST")
         initialLayouts as List<NodeLayout>
     }
-
-    // 计算 TeX 标准原子间距
-    val isScript = context.mathStyle == MathStyle.SCRIPT ||
-            context.mathStyle == MathStyle.SCRIPT_SCRIPT
-    val fontSizePx = with(density) { context.fontSize.toPx() }
-
-    // 对每对相邻节点计算间距（spacings[i] = nodes[i] 与 nodes[i+1] 之间的间距）
-    val spacings = FloatArray(nodes.size) { 0f }
-    for (i in 0 until nodes.size - 1) {
-        val leftNode = nodes[i]
-        val rightNode = nodes[i + 1]
-        // Space/HSpace 节点自带间距，不额外添加
-        if (leftNode is LatexNode.Space || leftNode is LatexNode.HSpace ||
-            rightNode is LatexNode.Space || rightNode is LatexNode.HSpace
-        ) {
-            continue
-        }
-        val leftType = MathSpacing.effectiveAtomType(nodes, i)
-        val rightType = MathSpacing.effectiveAtomType(nodes, i + 1)
-        val spacingFactor = MathSpacing.spaceBetween(leftType, rightType, isScript)
-        spacings[i] = spacingFactor * fontSizePx
-    }
-
-    var totalWidth = 0f
-    var maxAscent = 0f // 基线以上高度
-    var maxDescent = 0f // 基线以下高度
-
-    finalMeasuredNodes.forEachIndexed { index, layout ->
-        val ascent = layout.baseline
-        val descent = layout.height - layout.baseline
-        if (ascent > maxAscent) maxAscent = ascent
-        if (descent > maxDescent) maxDescent = descent
-        totalWidth += layout.width
-        if (index < spacings.size) totalWidth += spacings[index]
-    }
-
-    val height = maxAscent + maxDescent
-    val baseline = maxAscent
-
-    // 采集子节点布局信息到 LayoutMap（仅当 layoutMap 非 null 时）
-    if (layoutMap != null) {
-        var relX = 0f
-        finalMeasuredNodes.forEachIndexed { index, child ->
-            val relY = baseline - child.baseline
-            layoutMap.add(nodes[index], relX, relY, child.width, child.height, child.baseline)
-            relX += child.width
-            if (index < spacings.size) relX += spacings[index]
-        }
-    }
-
-    return NodeLayout(totalWidth, height, baseline) { x, y ->
-        val isRtl = context.textDirection == TextDirection.RTL
-        if (isRtl) {
-            // RTL: 子元素从右到左排列
-            var currentX = x + totalWidth
-            finalMeasuredNodes.forEachIndexed { index, child ->
-                currentX -= child.width
-                val childY = y + (baseline - child.baseline)
-                child.draw(this, currentX, childY)
-                if (index < spacings.size) currentX -= spacings[index]
-            }
-        } else {
-            // LTR: 默认从左到右排列
-            var currentX = x
-            finalMeasuredNodes.forEachIndexed { index, child ->
-                val childY = y + (baseline - child.baseline)
-                child.draw(this, currentX, childY)
-                currentX += child.width
-                if (index < spacings.size) currentX += spacings[index]
+    val metrics = InlineRowMetrics(nodes, layouts, context, density)
+    val maxWidth = context.layoutHints.maxLineWidth
+    if (context.layoutHints.lineBreakingEnabled && maxWidth != null && nodes.isNotEmpty() &&
+        metrics.width(0, nodes.size) > maxWidth
+    ) {
+        val ranges = LineBreaker(maxWidth).breakIntoRanges(
+            nodes, FloatArray(layouts.size) { layouts[it].width }, metrics::width
+        )
+        if (ranges.size > 1) {
+            return stackLines(ranges, context, density, layoutMap) { range, lineMap ->
+                assembleInlineRow(nodes, layouts, metrics, range.first, range.last + 1, context, lineMap)
             }
         }
     }
+    return assembleInlineRow(nodes, layouts, metrics, 0, nodes.size, context, layoutMap)
 }
 
-private fun measureVerticalLines(
-    lines: List<List<LatexNode>>, context: RenderContext, measurer: TextMeasurer, density: Density,
-    cache: LayoutCache? = null
+/** 从现成的节点尺寸装配一行，不执行任何测量。绘制和编辑器坐标共用定位规则。 */
+private fun assembleInlineRow(
+    nodes: List<LatexNode>, layouts: List<NodeLayout>, metrics: InlineRowMetrics,
+    start: Int, end: Int, context: RenderContext, layoutMap: LayoutMap?
 ): NodeLayout {
-    val measuredLines = lines.map { measureGroup(it, context, measurer, density, cache = cache) }
-    val maxWidth = measuredLines.maxOfOrNull { it.width } ?: 0f
-    val spacing = lineSpacingPx(context, density)
-
-    var totalHeight = 0f
-    val positions = measuredLines.map {
-        val y = totalHeight
-        totalHeight += it.height + spacing
-        y
+    val width = metrics.width(start, end)
+    var ascent = 0f
+    var descent = 0f
+    for (i in start until end) {
+        ascent = maxOf(ascent, layouts[i].baseline)
+        descent = maxOf(descent, layouts[i].height - layouts[i].baseline)
     }
-    if (positions.isNotEmpty()) totalHeight -= spacing // 移除最后一个间隙
-
-    // 整个块的基线通常与第一行的基线对齐
-    val baseline = measuredLines.firstOrNull()?.baseline ?: 0f
-
-    return NodeLayout(maxWidth, totalHeight, baseline) { x, y ->
-        measuredLines.forEachIndexed { i, line ->
-            // 默认左对齐
-            line.draw(this, x, y + positions[i])
+    val rowAscent = ascent
+    val isRtl = context.textDirection == TextDirection.RTL
+    if (layoutMap != null) {
+        forEachInlinePlacement(layouts, metrics, start, end, width, rowAscent, isRtl) { index, x, y ->
+            val child = layouts[index]
+            layoutMap.add(nodes[index], x, y, child.width, child.height, child.baseline)
+        }
+    }
+    return NodeLayout(width, rowAscent + descent, rowAscent) { originX, originY ->
+        forEachInlinePlacement(layouts, metrics, start, end, width, rowAscent, isRtl) { index, x, y ->
+            layouts[index].draw(this, originX + x, originY + y)
         }
     }
 }
+
+/** 内联遍历使测量与绘制共用坐标计算，无需为每行保存两份位置数组。 */
+private inline fun forEachInlinePlacement(
+    layouts: List<NodeLayout>, metrics: InlineRowMetrics, start: Int, end: Int,
+    width: Float, ascent: Float, isRtl: Boolean, action: (index: Int, x: Float, y: Float) -> Unit
+) {
+    var x = if (isRtl) width else 0f
+    for (i in start until end) {
+        val child = layouts[i]
+        if (isRtl) x -= child.width
+        val y = ascent - child.baseline
+        action(i, x, y)
+        val spacing = if (i + 1 < end) metrics.spacing(i, start, end) else 0f
+        if (isRtl) x -= spacing else x += child.width + spacing
+    }
+}
+
+/** 垂直组合显式行或自动行，并把行内坐标平移到整块内容坐标。 */
+private fun <T> stackLines(
+    lines: List<T>, context: RenderContext, density: Density, layoutMap: LayoutMap?,
+    measureLine: (T, LayoutMap?) -> NodeLayout
+): NodeLayout {
+    val spacing = lineSpacingPx(context, density)
+    val positions = FloatArray(lines.size)
+    val layouts = ArrayList<NodeLayout>(lines.size)
+    var height = 0f
+    var width = 0f
+    for ((i, line) in lines.withIndex()) {
+        val lineMap = if (layoutMap != null) LayoutMap() else null
+        val layout = measureLine(line, lineMap)
+        positions[i] = height
+        if (lineMap != null) layoutMap?.appendTranslated(lineMap, height)
+        layouts.add(layout)
+        width = maxOf(width, layout.width)
+        height += layout.height
+        if (i + 1 < lines.size) height += spacing
+    }
+    return NodeLayout(width, height, layouts.firstOrNull()?.baseline ?: 0f) { x, y ->
+        for (i in layouts.indices) layouts[i].draw(this, x, y + positions[i])
+    }
+}
+
+/** 自动换行属于外层流式容器约束，复合原子内部只保留显式换行。 */
+private fun RenderContext.withoutAutomaticLineBreaking(): RenderContext =
+    if (!layoutHints.lineBreakingEnabled && layoutHints.maxLineWidth == null) this else copy(
+        layoutHints = layoutHints.copy(lineBreakingEnabled = false, maxLineWidth = null)
+    )
 
 /**
  * 检查节点是否为需要自动编号的环境，如果是则在布局右侧追加编号标签 (N)。

@@ -181,18 +181,14 @@ object MathSpacing {
         val prevType = previousNonSpaceAtomType(nodes, index)
         val nextType = nextNonSpaceAtomType(nodes, index)
 
-        if (prevType == null || prevType in setOf(
-                AtomType.BIN, AtomType.OP, AtomType.REL, AtomType.OPEN, AtomType.PUNCT
-            )
-        ) {
-            return AtomType.ORD
+        when (prevType) {
+            null, AtomType.BIN, AtomType.OP, AtomType.REL, AtomType.OPEN, AtomType.PUNCT -> return AtomType.ORD
+            else -> Unit
         }
 
-        if (nextType == null || nextType in setOf(
-                AtomType.BIN, AtomType.REL, AtomType.CLOSE, AtomType.PUNCT
-            )
-        ) {
-            return AtomType.ORD
+        when (nextType) {
+            null, AtomType.BIN, AtomType.REL, AtomType.CLOSE, AtomType.PUNCT -> return AtomType.ORD
+            else -> Unit
         }
 
         return AtomType.BIN

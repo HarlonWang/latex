@@ -25,21 +25,9 @@ package com.hrm.latex.renderer.layout
 import com.hrm.latex.parser.model.LatexNode
 
 /**
- * line breaking engine for latex formulas
- *
- * uses penalty-based algorithm inspired by mathjax/katex:
- * - spaces have top priority (best break points)
- * - relations (=, <, >) have high priority
- * - binary operators (+, -) have medium priority
- * - multiplicative (×, ÷) have lower priority
- * - atomic structures (fractions, matrices) are unbreakable
- *
- * break position: operators go to the NEW line (latex convention)
- *
- * optimizations:
- * - stores index ranges instead of copying lists (zero-copy)
- * - O(1) break position lookup
- * - minimal allocations during line breaking
+ * 基于断点优先级的公式换行器：空格、关系符、加减、乘除依次优先，运算符放在新行。
+ * 分数、矩阵等原子不拆开；只有单个原子本身超宽时允许该行超过宽度限制。
+ * 使用区间输出和单调候选队列，每个节点、候选点至多入队和出队一次。
  */
 internal class LineBreaker(private val maxWidth: Float) {
 
@@ -53,104 +41,76 @@ internal class LineBreaker(private val maxWidth: Float) {
         private const val PENALTY_DEPTH_FACTOR = 400
     }
 
-    /**
-     * break state using index ranges to avoid list copying
-     */
-    private class BreakState {
-        val lineRanges = ArrayList<IntRange>(4)
-        var lineStart = 0
-        var currentPos = 0
-        var currentWidth = 0f
-        var bestBreakPos = -1
-        var bestBreakPenalty = NOBREAK
-        var widthAtBestBreak = 0f
-
-        fun commitBreak(): Boolean {
-            if (bestBreakPos < 0 || currentPos <= lineStart || bestBreakPos <= lineStart) return false
-
-            // break BEFORE the operator - operator goes to new line (latex convention)
-            lineRanges.add(lineStart until bestBreakPos)
-            lineStart = bestBreakPos
-
-            // O(1) width recalc: widthAtBestBreak is width BEFORE break point
-            // so remaining width = currentWidth - widthAtBestBreak
-            currentWidth -= widthAtBestBreak
-
-            bestBreakPos = -1
-            bestBreakPenalty = NOBREAK
-            widthAtBestBreak = 0f
-
-            return true
-        }
-
-        fun forceBreak() {
-            if (currentPos > lineStart) {
-                lineRanges.add(lineStart until currentPos)
-                lineStart = currentPos
-            }
-            currentWidth = 0f
-            bestBreakPos = -1
-            bestBreakPenalty = NOBREAK
-            widthAtBestBreak = 0f
-        }
-
-        fun finalize(): List<IntRange> {
-            if (currentPos > lineStart) {
-                lineRanges.add(lineStart until currentPos)
-            }
-            return lineRanges
-        }
-
-        fun recordBreakCandidate(globalIndex: Int, penalty: Int, widthBefore: Float) {
-            if (penalty < bestBreakPenalty) {
-                bestBreakPos = globalIndex
-                bestBreakPenalty = penalty
-                widthAtBestBreak = widthBefore
-            }
-        }
-    }
-
     fun breakIntoLines(
         nodes: List<LatexNode>,
         widths: FloatArray
-    ): List<List<Int>> {
-        if (nodes.isEmpty()) return listOf(emptyList())
+    ): List<List<Int>> = breakIntoRanges(nodes, widths).map { it.toList() }
 
-        var totalWidth = 0f
-        for (w in widths) totalWidth += w
-        if (totalWidth <= maxWidth) {
-            return listOf(nodes.indices.toList())
-        }
+    /**
+     * 返回连续、不重叠且覆盖全部节点的行区间。
+     *
+     * [lineWidth] 查询 [start, endExclusive) 的最终宽度，必须为 O(1)：调用方可用
+     * 原子宽度、间距的前缀和，再修正行首、行尾的 TeX 原子分类；不要在回调中扫描整行。
+     * 未提供回调时只计算节点宽度的前缀和。
+     */
+    fun breakIntoRanges(
+        nodes: List<LatexNode>,
+        widths: FloatArray,
+        lineWidth: ((start: Int, endExclusive: Int) -> Float)? = null
+    ): List<IntRange> {
+        require(widths.size == nodes.size) { "节点与宽度数量必须一致" }
+        if (nodes.isEmpty()) return listOf(IntRange.EMPTY)
 
-        val state = BreakState()
+        val prefixWidths = if (lineWidth == null) {
+            DoubleArray(widths.size + 1).also { prefix ->
+                for (index in widths.indices) prefix[index + 1] = prefix[index] + widths[index]
+            }
+        } else null
+        fun width(start: Int, end: Int): Float = lineWidth?.invoke(start, end)
+            ?: (prefixWidths!![end] - prefixWidths[start]).toFloat()
+
+        if (width(0, nodes.size) <= maxWidth) return listOf(nodes.indices)
+
+        // 按索引递增、罚分递增保存候选；同罚分保留更靠右的断点，避免过短行。
+        val candidateIndices = IntArray(nodes.size)
+        val candidatePenalties = IntArray(nodes.size)
+        var candidateHead = 0
+        var candidateEnd = 0
+        val ranges = ArrayList<IntRange>()
+        var lineStart = 0
         var depth = 0
 
         for (i in nodes.indices) {
             val node = nodes[i]
-            val width = widths[i]
-
             depth += getDepthDelta(node, entering = true)
+            val penalty = calculatePenalty(node, depth)
+            if (i > lineStart && penalty < NOBREAK) {
+                while (candidateEnd > candidateHead && candidatePenalties[candidateEnd - 1] >= penalty) {
+                    candidateEnd--
+                }
+                candidateIndices[candidateEnd] = i
+                candidatePenalties[candidateEnd] = penalty
+                candidateEnd++
+            }
+            depth += getDepthDelta(node, entering = false)
 
-            if (state.currentWidth + width > maxWidth && state.currentPos > state.lineStart) {
-                if (!state.commitBreak()) {
-                    state.forceBreak()
+            // 提交旧候选后，剩余部分加当前节点仍可能超宽，必须继续检查。
+            while (i > lineStart && width(lineStart, i + 1) > maxWidth) {
+                var breakAt = if (candidateHead < candidateEnd) candidateIndices[candidateHead] else i
+                // 负间距或边界修正可能使去掉前缀后的候选行反而变宽，不能提交超宽组合。
+                if (breakAt > lineStart + 1 && width(lineStart, breakAt) > maxWidth) {
+                    breakAt = lineStart + 1
+                }
+                ranges.add(lineStart until breakAt)
+                lineStart = breakAt
+                // 保留新行中尚未过期的候选，避免重新扫描后缀或丢失更靠后的运算符。
+                while (candidateHead < candidateEnd && candidateIndices[candidateHead] <= lineStart) {
+                    candidateHead++
                 }
             }
-
-            val widthBeforeThis = state.currentWidth
-            state.currentWidth += width
-            state.currentPos = i + 1
-
-            val penalty = calculatePenalty(node, depth)
-            if (penalty < NOBREAK) {
-                state.recordBreakCandidate(i, penalty, widthBeforeThis)
-            }
-
-            depth += getDepthDelta(node, entering = false)
         }
-
-        val ranges = state.finalize()
-        return ranges.map { range -> range.toList() }
+        ranges.add(lineStart until nodes.size)
+        return ranges
     }
 
     private fun getDepthDelta(node: LatexNode, entering: Boolean): Int {

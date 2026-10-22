@@ -80,6 +80,13 @@ class LayoutMap {
         entries.add(NodeLayoutEntry(node, relX, relY, width, height, baseline))
     }
 
+    /** 将一行的局部坐标合并到多行内容坐标，不复制临时条目列表。 */
+    internal fun appendTranslated(source: LayoutMap, offsetY: Float) {
+        for (entry in source.entries) {
+            add(entry.node, entry.relX, entry.relY + offsetY, entry.width, entry.height, entry.baseline)
+        }
+    }
+
     /** 获取所有条目（不可变视图） */
     fun entries(): List<NodeLayoutEntry> = entries.toList()
 

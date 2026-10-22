@@ -25,6 +25,7 @@ package com.hrm.latex.renderer.layout
 import com.hrm.latex.parser.model.LatexNode
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class LineBreakerTest {
@@ -211,5 +212,133 @@ class LineBreakerTest {
 
         // depth tracking should work correctly
         assertTrue(lines.isNotEmpty())
+    }
+
+    @Test
+    fun should_recheck_remaining_width_after_committing_a_candidate() {
+        val nodes = listOf(LatexNode.Text("a"), LatexNode.Text("+"), LatexNode.Text("b"))
+        val widths = floatArrayOf(1f, 90f, 90f)
+
+        val ranges = LineBreaker(100f).breakIntoRanges(nodes, widths)
+
+        // 旧实现提交 a 后，未检查剩下的 +b，错误地返回宽 180 的第二行。
+        assertEquals(listOf(0..0, 1..1, 2..2), ranges)
+        assertEquals(nodes.indices.toList(), ranges.flatMap { it.toList() })
+        assertTrue(ranges.all { range -> range.sumOf { widths[it].toDouble() } <= 100.0 })
+    }
+
+    @Test
+    fun should_preserve_later_candidates_when_the_first_break_leaves_an_oversized_suffix() {
+        val nodes = listOf("a", "=", "b", "+", "c").map { LatexNode.Text(it) }
+        val widths = floatArrayOf(1f, 1f, 60f, 1f, 60f)
+
+        val ranges = LineBreaker(100f).breakIntoRanges(nodes, widths)
+
+        // 优先在等号前分行后，剩余部分仍超宽；加号候选必须继续有效。
+        assertEquals(listOf(0..0, 1..2, 3..4), ranges)
+    }
+
+    @Test
+    fun should_prefer_the_latest_candidate_with_the_same_penalty() {
+        val nodes = listOf("a", "+", "b", "+", "c", "+", "d").map { LatexNode.Text(it) }
+
+        val ranges = LineBreaker(55f).breakIntoRanges(nodes, FloatArray(nodes.size) { 10f })
+
+        assertEquals(listOf(0..4, 5..6), ranges)
+    }
+
+    @Test
+    fun should_include_supplied_spacing_in_line_width() {
+        val nodes = listOf("a", "+", "b").map { LatexNode.Text(it) }
+        val widths = FloatArray(nodes.size) { 10f }
+        val lineWidth = { start: Int, end: Int ->
+            val count = end - start
+            count * 10f + (count - 1) * 10f
+        }
+
+        val ranges = LineBreaker(35f).breakIntoRanges(nodes, widths, lineWidth)
+
+        assertEquals(listOf(0..0, 1..2), ranges)
+        assertTrue(ranges.all { lineWidth(it.first, it.last + 1) <= 35f })
+    }
+
+    @Test
+    fun should_recompute_boundary_spacing_for_each_new_line_start() {
+        val nodes = listOf("a", "+", "b", "+", "c").map { LatexNode.Text(it) }
+        val widths = FloatArray(nodes.size) { 10f }
+        val lineWidth = { start: Int, end: Int ->
+            val count = end - start
+            var width = count * 10f + (count - 1) * 4f
+            // 模拟行首、行尾二元符降为普通原子后的边界间距变化，查询保持 O(1)。
+            if (count > 1 && start % 2 == 1) width -= 4f
+            if (count > 1 && (end - 1) % 2 == 1) width -= 4f
+            width
+        }
+
+        val ranges = LineBreaker(36f).breakIntoRanges(nodes, widths, lineWidth)
+
+        assertEquals(listOf(0..0, 1..2, 3..4), ranges)
+        assertTrue(ranges.all { lineWidth(it.first, it.last + 1) <= 36f })
+    }
+
+    @Test
+    fun should_keep_width_queries_linear_when_many_candidates_are_present() {
+        val nodes = List(1000) { LatexNode.Text(if (it % 2 == 0) "a" else "+") }
+        val widths = FloatArray(nodes.size) { 1f }
+        var queries = 0
+
+        val ranges = LineBreaker(10f).breakIntoRanges(nodes, widths) { start, end ->
+            queries++
+            (end - start).toFloat()
+        }
+
+        assertEquals(nodes.indices.toList(), ranges.flatMap { it.toList() })
+        assertTrue(ranges.all { it.count() <= 10 })
+        assertTrue(queries <= 2 * nodes.size + 1, "宽度查询不应随分行重扫后缀：$queries")
+    }
+
+    @Test
+    fun should_allow_overflow_only_for_an_indivisible_atom() {
+        val nodes = listOf(
+            LatexNode.Text("a"),
+            LatexNode.Fraction(LatexNode.Text("1"), LatexNode.Text("2")),
+            LatexNode.Text("b"),
+        )
+
+        val ranges = LineBreaker(100f).breakIntoRanges(nodes, floatArrayOf(10f, 150f, 10f))
+
+        assertEquals(listOf(0..0, 1..1, 2..2), ranges)
+    }
+
+    @Test
+    fun should_not_commit_an_oversized_candidate_after_removing_a_negative_advance() {
+        val nodes = listOf(
+            LatexNode.HSpace("-1em"), LatexNode.Text("="), LatexNode.Text("a"),
+            LatexNode.Text("b"), LatexNode.Text("+"), LatexNode.Text("c"),
+        )
+        val widths = floatArrayOf(-100f, 0f, 90f, 90f, 0f, 90f)
+
+        val ranges = LineBreaker(100f).breakIntoRanges(nodes, widths)
+
+        assertEquals(nodes.indices.toList(), ranges.flatMap { it.toList() })
+        assertTrue(ranges.all { range -> range.sumOf { widths[it].toDouble() } <= 100.0 })
+    }
+
+    @Test
+    fun should_keep_the_original_list_api_compatible_with_ranges() {
+        val nodes = listOf("a", "+", "b").map { LatexNode.Text(it) }
+        val widths = floatArrayOf(15f, 10f, 15f)
+        val breaker = LineBreaker(25f)
+
+        assertEquals(breaker.breakIntoRanges(nodes, widths).map { it.toList() }, breaker.breakIntoLines(nodes, widths))
+        assertEquals(listOf(IntRange.EMPTY), breaker.breakIntoRanges(emptyList(), floatArrayOf()))
+        assertEquals(listOf(emptyList()), breaker.breakIntoLines(emptyList(), floatArrayOf()))
+    }
+
+    @Test
+    fun should_reject_mismatched_node_and_width_counts() {
+        assertFailsWith<IllegalArgumentException> {
+            LineBreaker(100f).breakIntoRanges(listOf(LatexNode.Text("x")), floatArrayOf())
+        }
     }
 }
